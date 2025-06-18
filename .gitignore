@@ -1,0 +1,57 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PIP log and test cache
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.cache/
+
+# Environment variables
+.env
+*.env
+
+# Compiled files
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# MyPy, coverage and others
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Uvicorn reload files
+*.reload
+
+# Local test db or data
+*.sqlite3
+*.log
+*.db
+
+#code file
+journal_entry.py
