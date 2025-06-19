@@ -401,46 +401,22 @@ def generate_daily_summary_journal(insight: DailyInsight):
     user_id = insight.user_id
 
     # --- Fetch All Initial Questions ---
-    initial_retriever = vectorstore.as_retriever(
+    retriever = vectorstore.as_retriever(
         search_kwargs={
             "filter": Filter(
                 must=[
-                    FieldCondition(
-                        key="type",
-                        match=MatchValue(value="initial")
-                    ),
-                    FieldCondition(
-                        key="userId",
-                        match=MatchValue(value=user_id)
-                    )
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(key="type", match=MatchAny(
+                        any=["initial", "journal"]))
                 ]
             ),
-            "k": 13
+            "k": 30
         }
     )
-    initial_docs = initial_retriever.get_relevant_documents("initial")
-    print("Initial Docs for daily journal:", initial_docs)
-
-    # --- Fetch All Past Journals ---
-    journal_retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "filter": Filter(
-                must=[
-                    FieldCondition(
-                        key="type", match=MatchValue(value="journal")),
-                    FieldCondition(
-                        key="userId", match=MatchValue(value=user_id))
-                ]
-            ),
-            "k": 100  # Increase if more journals exist
-        }
-    )
-    journal_docs = journal_retriever.get_relevant_documents("journal")
-    print("Journal Docs for daily journal:", journal_docs)
-
-    # --- Combine All Content ---
-    context = "\n\n".join(
-        [doc.page_content for doc in initial_docs + journal_docs])
+    docs = retriever.get_relevant_documents("generate daily journal")
+    print("Retrieved Docs for Daily Journal:", docs)
+    combined_context = "\n\n".join(doc.page_content for doc in docs)
 
     # --- Prompt to Gemini ---
     daily_journal_prompt = PromptTemplate(
@@ -457,9 +433,11 @@ def generate_daily_summary_journal(insight: DailyInsight):
 
     Instructions:
     - Don't repeat content. Write a fresh journal even if the questions or themes are reused.
-    - Try a new emotional angle each time — explore different aspects of what they’ve shared.
+
+    - Use their tone and themes like ambition, doubt, confidence, growth, purpose, etc.
     - Let the journal feel organic — like a snapshot of what the user might genuinely be thinking or feeling and make sure to use the data of the user from the initial and journals.
-    - Keep it grounded. Use about **90% actual context**, and at most **10% subtle, fitting imagination** — but only if that imagination enhances the realism of the journal and aligns perfectly with the user’s profile and tone.
+    - Keep it grounded. Use about **98% actual context**, and at most **2% subtle, fitting imagination** — but only if that imagination enhances the realism of the journal and aligns  perfectly with the user’s profile and tone.
+    - make sure to don't use the same words in the start ofthe journal. use different words without changing the meaning of the journal.
 
     Final Output:
     Write **only** the new journal entry. Do not explain it or add labels like "Journal".
@@ -468,31 +446,17 @@ def generate_daily_summary_journal(insight: DailyInsight):
 
     chain = RetrievalQA.from_chain_type(
         llm=llm,
-        retriever=journal_retriever,  # optional, for structure
+        retriever=retriever,
         chain_type="stuff",
         chain_type_kwargs={"prompt": daily_journal_prompt},
-        input_key="question"
+        input_key="context"
     )
 
     response = chain.invoke({
-        "context": context,
-        "question": "Write today's journal entry."
+        "context": combined_context,
+        # "question": "What do you fear losing the most?"
     })
 
     generated_journal = response["result"]
-
-    # --- Save to Qdrant ---
-    point = PointStruct(
-        id=str(uuid4()),
-        vector=embedding_model.embed_query(generated_journal),
-        payload={
-            "type": "daily_journal",
-            "userId": user_id,
-            "text": generated_journal,
-            "timestamp": int(time() * 1000),
-            "date": datetime.now().strftime("%Y-%m-%d")
-        }
-    )
-    qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])
 
     return {"daily_journal": generated_journal}
