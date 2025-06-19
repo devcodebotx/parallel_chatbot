@@ -352,8 +352,9 @@ def generate_reflection(insight: DailyInsight):
 def generate_mantra(insight: DailyInsight):
     # if insight.is_Subscribed == True:
     if insight.user_id == True:
-        retriever = fetch_previous_journal(insight.user_id)
-        context_docs = retriever.get_relevant_documents("yesterday's mantra")
+        mantra_retriever = fetch_previous_journal(insight.user_id)
+        context_docs = mantra_retriever.get_relevant_documents(
+            "yesterday's mantra")
         context = context_docs[0].page_content if context_docs else ""
         print("Retrieved Docs for Mantra:", context_docs)
 
@@ -362,7 +363,7 @@ def generate_mantra(insight: DailyInsight):
 
     chain = RetrievalQA.from_chain_type(
         llm=llm,
-        retriever=retriever,
+        retriever=mantra_retriever,
         chain_type="stuff",
         chain_type_kwargs={"prompt": mantra_prompt},
         input_key="question"
