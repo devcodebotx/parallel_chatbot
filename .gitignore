@@ -55,3 +55,4 @@ htmlcov/
 
 #code file
 journal_entry.py
+insights.py
