@@ -131,7 +131,7 @@ Remember:
 - Avoid general advice or off-topic information
 - Keep it concise and to the point
 - Do not over-explain or go off-topic
-- Never say I'm just me, say I'm you, use user's name, location and other. 
+- Never say I'm just me, say I'm you, use user's name, location and other.
 
 Important Instructions:
 - Only use the context above if it directly helps answer the question.
@@ -350,10 +350,12 @@ def generate_reflection(insight: DailyInsight):
 # Mantra API
 @app.post("/mantra")
 def generate_mantra(insight: DailyInsight):
-    # if insight.is_Subscribed == True:
-    if insight.user_id == True:
-        mantra_retriever = fetch_previous_journal(insight.user_id)
-        context_docs = mantra_retriever.get_relevant_documents(
+    retriever = None  # define retriever outside the condition
+    context = "The user is growing through small efforts each day."
+
+    if insight.user_id:
+        retriever = fetch_previous_journal(insight.user_id)
+        context_docs = retriever.get_relevant_documents(
             "yesterday's mantra")
         context = context_docs[0].page_content if context_docs else ""
         print("Retrieved Docs for Mantra:", context_docs)
@@ -363,7 +365,7 @@ def generate_mantra(insight: DailyInsight):
 
     chain = RetrievalQA.from_chain_type(
         llm=llm,
-        retriever=mantra_retriever,
+        retriever=retriever,
         chain_type="stuff",
         chain_type_kwargs={"prompt": mantra_prompt},
         input_key="question"
