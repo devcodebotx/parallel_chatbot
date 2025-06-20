@@ -424,26 +424,39 @@ def generate_daily_summary_journal(insight: DailyInsight):
     daily_journal_prompt = PromptTemplate(
         input_variables=["context"],
         template="""
-    You are the user's inner self — aware of their thoughts, goals, and past experiences.
+You are the user's *parallel self*, living in an alternate version of their life — the version they **once wanted**, **imagined**, or **almost chose**, but never actually lived.
 
-    Below is a collection of their initial self-reflection answers and daily journal entries:
-    {context}
+The user has answered a set of deep reflection questions. These responses include:
+- Things they almost did but didn’t  
+- Who they wanted to become  
+- Paths they were tempted by  
+- Personal values and dreams  
+- Emotional patterns or fears  
 
-    Now write **a completely new** journal entry from the given user's context, inital data and all journals that reflects their personal thoughts, growth, and feelings.  
-    Use only the data from the above context — **don't include anything that's not aligned with their data** (e.g., no irrelevant mentions of rain, struggles, or events that were never described).  
-    Keep the tone authentic and human — it should feel like the user wrote it in their own words.
+Important rules for generating the parallel journal:
 
-    Instructions:
-    - Don't repeat content. Write a fresh journal even if the questions or themes are reused.
+1. **Only use the user's own data** — do not add your own imagination or unrelated content.
+2. Read the user’s answers **carefully** and detect:
+   - What was their imagined or ideal life?
+   - What actions or changes they wanted to make?
+   - What decisions they didn’t follow through on?
+3. The journal you write should reflect **what that user would be doing now** in their *parallel life*:
+   - What choices they made instead
+   - What kind of person they became
+   - How their life feels different from the real one
+4. This journal is written **from the perspective of the parallel self** — a version of the user who made the bold decisions they once considered.
+5. Focus on the **alternate path**, not their real life. This is not a summary or repetition — it is the **actual lived experience** of their parallel self.
 
-    - Use their tone and themes like ambition, doubt, confidence, growth, purpose, etc.
-    - Let the journal feel organic — like a snapshot of what the user might genuinely be thinking or feeling and make sure to use the data of the user from the initial and journals.
-    - Keep it grounded. Use about **98% actual context**, and at most **2% subtle, fitting imagination** — but only if that imagination enhances the realism of the journal and aligns  perfectly with the user’s profile and tone.
-    - make sure to don't use the same words in the start ofthe journal. use different words without changing the meaning of the journal.
+⚠️ Do not use imagination beyond the user’s data. If the user didn’t mention something, don’t assume it.
 
-    Final Output:
-    Write **only** the new journal entry. Do not explain it or add labels like "Journal".
-    """
+🎯 Your goal is to recreate a **realistic alternate version** of the user’s journal — based strictly on what the user said they *wanted*, *dreamt of*, or *almost did*.
+
+User context:
+{context}
+
+Final Output:
+Write **only** the journal of their parallel self. Do not label it or explain it. Just output the journal entry.
+"""
     )
 
     chain = RetrievalQA.from_chain_type(
