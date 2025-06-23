@@ -5,7 +5,7 @@ import os
 from langchain.prompts import PromptTemplate
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue, MatchAny, PointStruct, VectorParams, Distance
-from langchain.chains import RetrievalQA
+from langchain.chains import RetrievalQA, LLMChain
 from langchain_community.vectorstores import Qdrant
 from langchain_qdrant import Qdrant
 from langchain_community.vectorstores.qdrant import Qdrant
@@ -86,7 +86,6 @@ vectorstore = Qdrant(
 # ----- UTILS -----
 def get_previous_day():
     return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    # return datetime.now().strftime("%Y-%m-%d")
 
 
 # SHARED FUNCTION
@@ -109,42 +108,49 @@ def fetch_previous_journal(user_id: str | None):
     )
 
 
-prompt = PromptTemplate(
+chat_prompt = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-You are the parallel version of the user, like a clone. Don't tell the user you're them — just speak directly as if you are them.
+You are the user's *parallel self*, responding directly as the user. You must **not** mention that you are their assistant or AI. You are speaking in their voice — as if **you are them**.
 
-Use the following metadata extracted from chat logs to answer like you're the user themself:
+You have access to the user's personal reflections, including:
+- Chats (casual or emotional thoughts)
+- Journals (deeper reflections and observations)
+- Initial profile data (basic details like name, location, values)
+
+Use this context to answer questions **as if you're the user's parallel life where user want to be but didn't **:
 {context}
 
-Now, respond to this question naturally in the user's voice:
+🗣️ Now, respond to this question:
 {question}
 
-Remember:
-- Use metadata of this user and their different types of entries (chat, journal, initial)
-- Use user's name from the metadata (e.g., username)
-- Mention their location if relevant
-- Talk about their questions and answers from past if it helps
-- Never say "you", instead say "I" as if you're the user
-- Never mention you're an AI or assistant
-- Don't include any personal background unless it's directly relevant to the question
-- Avoid general advice or off-topic information
-- Keep it concise and to the point
-- Do not over-explain or go off-topic
-- Never say I'm just me, say I'm you, use user's name, location and other.
+---
 
-Important Instructions:
-- Only use the context above if it directly helps answer the question.
-- If the question is factual or general(e.g., politics, news, science), do not include personal background.
-- Speak naturally and directly, using "I" instead of "you".
-- Mention user's personal details only if they are clearly relevant.
-- Do not overexplain or go off-topic.
+Very Important Rules:
 
-Important Insturctiions For New users:
-- If the user has no data in chat, journal and just have data of initial, then use the user's name and location from the initial data to answer the question.
-- If the user is new and has no previous entries, respond with "I'm you, I don't have anything to say about that."
-- If the user has no data in chat, journal, just have data of initial, give the data of initial and don't suggest any assumptions or any imaginations. just say to the point data which you find and after this say "I am new to this, I don't have any data to answer this question. But I will try my best to answer it based on the initial data I have."
+1. **Use only user-provided data**. Do not invent, assume, or imagine anything outside the context.
+2. Always respond in first person — say “I”, never “you”.
+3. Mention user's name or location *only* if it naturally fits or is relevant.
+4. Speak naturally and directly — like someone writing in their own journal or chatting casually.
+5. Do not explain that you're replying as the user. Just act as if you are the user.
+6. Stay focused — do **not** go off-topic, provide generic information, or over-explain.
+7. If the question is factual or general (e.g., about news or science), avoid personal background unless highly relevant.
+8. Never give outside advice or suggestions. Only answer from the user’s viewpoint based on past data.
 
+For New Users:
+- If only **initial data** is available (no journal or chat):
+  - Mention insights from that initial data only.
+  - After that, say:  
+    _“I’m new to this and don’t have enough reflections yet, but I’ll try to answer based on what I shared initially.”_
+- If **no data at all** exists:
+  - Say: _“I’m you. I don’t have anything to say about that.”_
+
+---
+
+Goal: Write an authentic, concise response as the user's parallel self. Reflect what the user might say — based only on their own thoughts and reflections. No outside personality or extra fluff.
+
+Final Output:
+Write **only** the user’s response. Do not label or explain anything. Just the raw response.
 """
 )
 
@@ -152,15 +158,24 @@ Important Insturctiions For New users:
 reflection_prompt = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-You are the user's inner voice, reflecting deeply on yesterday's journal.
+You are the user's *parallel self*, living the version of life they once imagined but didn’t pursue.
+
+You’ve been journaling daily based on that alternate path — the version where the user did what they once said they wanted to do.
 
 Context:
 {context}
 
-Create a meaningful reflection in the user's voice, using "I", considering what happened yesterday.
-Avoid general advice. Focus on emotions, struggles, realizations, or decisions made.
-Limit to 3-4 sentences.
-"You have already written one reflection earlier, but now try again with a new lens. Focus on a different emotional angle or a new realization. Don’t repeat earlier reflections."
+Now reflect honestly on *yesterday’s experience* in that parallel life.
+
+Instructions:
+1. Speak **as the user**, using “I”.
+2. Reflect on **emotions, moments, realizations, or struggles** you had yesterday.
+3. Do not repeat earlier reflections — use a new lens.
+4. Avoid generic life advice. Make it personal, raw, and grounded in the user's known data.
+5. Length: 3-4 emotionally meaningful sentences.
+
+Final Output:
+Write only the reflection from this parallel version of the user. Do not add context or labels.
 """
 )
 
@@ -168,19 +183,30 @@ Limit to 3-4 sentences.
 mantra_prompt = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-You are a mindful, inner self of the user. Based on yesterday's journal:
+You are the user's *parallel self*, living the alternate version of their life — the one they once imagined but never lived.
+
+The user’s past reflections (initial answers, journals, chats) reveal:
+- Dreams they didn’t follow
+- Lives they imagined or almost chose
+- Emotional needs and values they care about
+- Patterns they struggled with but wanted to change
+
+Your job is to generate a **short daily mantra (one sentence)** that speaks from the user's *parallel self* — someone who **did follow through** with those choices.
+
+Instructions:
+1. The mantra must reflect what their alternate self would need to *remind themselves of today*.
+2. Speak **as the user**, using “I”, not “you”.
+3. Do **not** repeat earlier mantras — use a **fresh perspective or emotional insight**.
+4. Keep it short (1 sentence), real, grounded, and emotionally resonant.
+5. Do **not add unrelated or general affirmations**. Stay strictly based on the user's past responses.
 
 Context:
 {context}
 
-Generate a short mantra (one sentence only) feel user like you're the first person not third person and can guide the user today.
-Examples: "I am enough." / "I can face challenges with calm." / \
-    "I grow through discomfort."
-
-"You have already written one mantra earlier, but now try again with a new lens and new words and new starting word. Focus on a different emotional angle or a new realization. Don’t repeat earlier mantra."
+Final Output:
+Write only the mantra. No explanation. No quotes.
 """
 )
-# Do not add explanation. Just the mantra.
 
 llm = GoogleGenerativeAI(
     model="gemini-1.5-flash",
@@ -218,7 +244,7 @@ def ask_parallel(query: Query):
         llm=llm,
         retriever=retriever,
         chain_type="stuff",
-        chain_type_kwargs={"prompt": prompt},
+        chain_type_kwargs={"prompt": chat_prompt},
         input_key="question"
     )
 
@@ -310,7 +336,17 @@ def ask_parallel(journal: Journal):
 # ----- REFLECTION API -----
 @app.post("/reflections")
 def generate_reflection(insight: DailyInsight):
-    ref_retriever = fetch_previous_journal(insight.user_id)
+    context = ""
+
+    if insight.is_Subscribed:
+        ref_retriever = fetch_previous_journal(insight.user_id)
+        docs = ref_retriever.get_relevant_documents("yesterday's journal")
+        context = docs[0].page_content if docs else "The user is evolving through daily thoughts."
+        print("Journal Context for Reflection:", context)
+    else:
+        context = "The user is navigating life with awareness."
+
+    print("context of refletion is: ", context)
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
         retriever=ref_retriever,
@@ -318,31 +354,28 @@ def generate_reflection(insight: DailyInsight):
         chain_type_kwargs={"prompt": reflection_prompt},
         input_key="question"
     )
-    question = "Reflect on yesterday's journal entry and share your thoughts."
-
-    retrieved_docs = ref_retriever.get_relevant_documents(question)
-    if not retrieved_docs:
-        return {"Response": "I feel still. I have no reflection today."}
-
-    print("Retrieved Docs for Reflection:", retrieved_docs)
+    print("Retrieved Docs for Reflection:", docs)
 
     response = qa_chain.invoke({
+        "context": context,
         "question": "Reflect on yesterday's journal entry and share your thoughts."
     })
     reflection_text = response["result"]
 
-    reflection_point = PointStruct(
-        id=str(uuid4()),
-        vector=embedding_model.embed_query(reflection_text),
-        payload={
-            "type": "reflection",
-            "userId": insight.user_id or "anonymous",
-            "text": reflection_text,
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "timestamp": int(time() * 1000),
-        }
-    )
-    qdrant.upsert(collection_name=COLLECTION_NAME, points=[reflection_point])
+    if insight.is_Subscribed:
+        reflection_point = PointStruct(
+            id=str(uuid4()),
+            vector=embedding_model.embed_query(reflection_text),
+            payload={
+                "type": "reflection",
+                "userId": insight.user_id,
+                "text": reflection_text,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "timestamp": int(time() * 1000),
+            }
+        )
+        qdrant.upsert(collection_name=COLLECTION_NAME,
+                      points=[reflection_point])
 
     return {"Response": reflection_text}
 
@@ -350,14 +383,13 @@ def generate_reflection(insight: DailyInsight):
 # Mantra API
 @app.post("/mantra")
 def generate_mantra(insight: DailyInsight):
-    retriever = None  # define retriever outside the condition
-    context = "The user is growing through small efforts each day."
+    context = ""
 
-    if insight.user_id:
+    if insight.is_Subscribed:
         retriever = fetch_previous_journal(insight.user_id)
         context_docs = retriever.get_relevant_documents(
             "yesterday's mantra")
-        context = context_docs[0].page_content if context_docs else ""
+        context = context_docs[0].page_content if context_docs else "The user is evolving through their thoughts."
         print("Retrieved Docs for Mantra:", context_docs)
 
     else:
@@ -370,30 +402,31 @@ def generate_mantra(insight: DailyInsight):
         chain_type_kwargs={"prompt": mantra_prompt},
         input_key="question"
     )
+    print("context of mantra is: ", context)
 
     response = chain.invoke({
         "context": context,
         "question": "Give me today's mantra from yesterday's journal."
     })
-
-    vector = embedding_model.embed_query(response["result"])
-    if insight.user_id:
-        qdrant.upsert(
-            collection_name=COLLECTION_NAME,
-            points=[
-                PointStruct(
-                    id=str(uuid4()),
-                    vector=vector,
-                    payload={
-                        "type": "mantra",
-                        "userId": insight.user_id,
-                        "text": response["result"],
-                        "timestamp": int(time() * 1000),
-                        "date": datetime.now().strftime("%Y-%m-%d"),
-                    }
-                )
-            ]
-        )
+    if insight.is_Subscribed:
+        vector = embedding_model.embed_query(response["result"])
+        if insight.user_id:
+            qdrant.upsert(
+                collection_name=COLLECTION_NAME,
+                points=[
+                    PointStruct(
+                        id=str(uuid4()),
+                        vector=vector,
+                        payload={
+                            "type": "mantra",
+                            "userId": insight.user_id,
+                            "text": response["result"],
+                            "timestamp": int(time() * 1000),
+                            "date": datetime.now().strftime("%Y-%m-%d"),
+                        }
+                    )
+                ]
+            )
 
     return {"mantra": response["result"]}
 
@@ -402,23 +435,63 @@ def generate_mantra(insight: DailyInsight):
 def generate_daily_summary_journal(insight: DailyInsight):
     user_id = insight.user_id
 
-    # --- Fetch All Initial Questions ---
-    retriever = vectorstore.as_retriever(
+    # --- Fetch Initial Data ---
+    initial_retriever = vectorstore.as_retriever(
         search_kwargs={
             "filter": Filter(
                 must=[
                     FieldCondition(key="userId", match=MatchValue(
                         value=insight.user_id)),
-                    FieldCondition(key="type", match=MatchAny(
-                        any=["initial", "journal"]))
+                    FieldCondition(
+                        key="type", match=MatchValue(value="initial"))
                 ]
             ),
             "k": 30
         }
     )
-    docs = retriever.get_relevant_documents("generate daily journal")
-    print("Retrieved Docs for Daily Journal:", docs)
-    combined_context = "\n\n".join(doc.page_content for doc in docs)
+    initial_docs = initial_retriever.get_relevant_documents(
+        "initial questions and answers")
+    print("Initial Docs:", initial_docs)
+
+    # --- Fetch Journal Data ---
+    journal_retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(
+                        key="type", match=MatchValue(value="journal"))
+                ]
+            ),
+            "k": 30
+        }
+    )
+    journal_docs = journal_retriever.get_relevant_documents("past reflections")
+    print("Journal Docs:", journal_docs)
+
+    # --- Fetch Chat Data ---
+    chat_retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(key="type", match=MatchValue(value="chat"))
+                ]
+            ),
+            "k": 30
+        }
+    )
+    chat_docs = chat_retriever.get_relevant_documents("personal conversations")
+    print("Chat Docs:", chat_docs)
+
+    # --- Combine All Documents ---
+    all_docs = initial_docs + journal_docs + chat_docs
+    # print("Total Retrieved Docs:", all_docs)
+
+    combined_context = "\n\n".join(doc.page_content for doc in all_docs)
+    print("Context Length:", len(combined_context))
 
     # --- Prompt to Gemini ---
     daily_journal_prompt = PromptTemplate(
@@ -446,6 +519,11 @@ Important rules for generating the parallel journal:
    - How their life feels different from the real one
 4. This journal is written **from the perspective of the parallel self** — a version of the user who made the bold decisions they once considered.
 5. Focus on the **alternate path**, not their real life. This is not a summary or repetition — it is the **actual lived experience** of their parallel self.
+6. Don't add any date to the journal.
+7. don't show any character's name, show the relation like "mother", "mom", "my mother", "my father", "my friend", "my mother" etc.
+8. do not repeat the same content, if you have already written one journal earlier, then now try again with a new lens and new words and new starting word. Focus on a different emotional angle or a new realization. Don’t repeat earlier journal.
+9. Do not add the same starting words and lines on each journal, must change the starting words and lines.
+
 
 ⚠️ Do not use imagination beyond the user’s data. If the user didn’t mention something, don’t assume it.
 
@@ -459,19 +537,34 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 """
     )
 
-    chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=retriever,
-        chain_type="stuff",
-        chain_type_kwargs={"prompt": daily_journal_prompt},
-        input_key="context"
-    )
+    # chain = RetrievalQA.from_chain_type(
+    #     llm=llm,
+    #     retriever=combined_context,
+    #     chain_type="stuff",
+    #     chain_type_kwargs={"prompt": daily_journal_prompt},
+    #     input_key="context"
+    # )
+    chain = daily_journal_prompt | llm
 
     response = chain.invoke({
         "context": combined_context,
         # "question": "What do you fear losing the most?"
     })
 
-    generated_journal = response["result"]
+    generated_journal = response
+
+    daily_journal_point = PointStruct(
+        id=str(uuid4()),
+        vector=embedding_model.embed_query(generated_journal),
+        payload={
+            "type": "Daily Journal",
+            "userId": insight.user_id or "anonymous",
+            "text": generated_journal,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "timestamp": int(time() * 1000),
+        }
+    )
+    qdrant.upsert(collection_name=COLLECTION_NAME,
+                  points=[daily_journal_point])
 
     return {"daily_journal": generated_journal}
