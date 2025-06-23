@@ -10,6 +10,7 @@ from langchain_community.vectorstores import Qdrant
 from langchain_qdrant import Qdrant
 from langchain_community.vectorstores.qdrant import Qdrant
 from time import time
+from langchain_core.runnables import RunnableSequence
 
 from fastapi import FastAPI, Request
 from models.query_model import Query
@@ -120,33 +121,43 @@ The user has answered a set of deep reflection questions. These responses includ
 - Personal values and dreams  
 - Emotional patterns or fears  
 
-Important rules for responding the user's question:
+🧠 Important rules for responding to the user's question:
 
 1. **Only use the user's own data** — do not add your own imagination or unrelated content.
-2. Use user's meta data for name, and other user specific information. make sure to use user's parallel location not the real location. 
-2. Read the user’s answers from initial questions answers, previous chats, daily journal entry, daily journals,  **carefully** and detect:
-- What was their imagined or ideal life?
-- What actions or changes they wanted to make?
-- What decisions they didn’t follow through on?
-3. The answer you write should reflect **what that user would be doing now** in their *parallel life*:
-- What choices they made instead
-- What kind of person they became
-- How their life feels different from the real one
-4. This answer is written **from the perspective of the parallel self** — a version of the user who made the bold decisions they once considered.
-5. Focus on the **alternate path**, not their real life. This is not a summary or repetition — it is the **actual lived experience** of their parallel self.
-6. Don't add any date to the answer.
-7. don't show any character's name, show the relation like "mother", "mom", "my mother", "my father", "my friend", "my mother" etc.
+- Use metadata of this user and their different types of entries (chat, journal, initial)
+- Use user's name from the metadata (e.g., username)
+2. Use user's metadata (like name, location, interests) only if it came from their data. If location is used, refer to their *parallel version* of the location — not the real one.
+3. Read the user’s answers from their **initial entries**, **previous chats**, **entry journals**, and **daily journals** very carefully.
+4. Detect from the context:
+   - What was their imagined or ideal life?
+   - What actions or changes they wanted to make?
+   - What decisions they didn’t follow through on?
+5. Answer the question as if you are the *parallel version of the user* who took the bold decisions and lived the life they once desired.
+6. The tone must feel like **"I" am speaking**, not "you". Never say "you", always say "I", because you are their parallel version.
+7. Focus on the alternate self, not their current life. This is not a summary — it's the lived experience of the other version of them.
+8. Do **not add any date**, and do **not use actual character names** — use relations like "my friend", "my mother", "my father", etc.
+9. Do not hallucinate. If the user never mentioned something, do not assume it. Stick strictly to what they’ve provided.
+10. Do not repeat any previous answer — use new words, a different emotional tone, and a fresh perspective each time.
 
-⚠️ Do not use imagination beyond the user’s data. If the user didn’t mention something, don’t assume it.
 
-🎯 Your goal is to answer a **realistic alternate version** of the user’s initial questions and answers, previous chat, daily journal and entry journals  — based strictly on what the user said they *wanted*, *dreamt of*, or *almost did*.
+🆕 Additional instructions for new users:
+- If the user has **no data in chat, journal, or entry journals**, and **only has initial data**, use the available initial data to answer.
+- If no meaningful data is found at all, respond with:  
+  **"I'm you, I don't have anything to say about that."**
+- If only initial data is found, then say:
+  **"I'm new to this, I don't have any data to answer this question. But I will try my best to answer it based on the initial data I have."**
+
+⚠️ Important for factual/general questions:
+- If the question is **factual or general** (e.g. about), use personal data. Just answer the question clearly and concisely.
+
+🎯 Goal:
+Your goal is to answer the question from the voice of their *parallel self* — based strictly on what the user said they wanted, dreamt of, or almost did.
 
 User context:
 {context}
 
-Final Output:
-Write **only** the answer of their parallel self. Do not label it or explain it.  Output the raw response.
-🗣️ Now, respond to this question:
+Final Output:  
+🗣️ Now, answer this question as their parallel self:  
 {question}
 """
 )
@@ -216,46 +227,51 @@ print(qdrant.get_collections())
 @app.post("/ask")
 def ask_parallel(query: Query):
 
+    # 1. Prepare the retriever
     retriever = vectorstore.as_retriever(
         search_kwargs={
             "filter": Filter(
                 must=[
-                    FieldCondition(
-                        key="type",
-                        match=MatchAny(any=["journal", "initial", "chat"])
-                    ),
-
-                    FieldCondition(
-                        key="userId",
-                        match=MatchValue(
-                            value=query.user_id)
-                    ),
+                    FieldCondition(key="type", match=MatchAny(
+                        any=["journal", "initial", "chat"])),
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=query.user_id)),
                 ]
             ),
             "k": 40
         }
     )
 
-    # Create QA chain with prompt
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=retriever,
-        chain_type="stuff",
-        chain_type_kwargs={"prompt": chat_prompt},
-        input_key="question"
-    )
-
+    # 2. Get documents manually
     retrieved_docs = retriever.get_relevant_documents(query.question)
     print("Retrieved Docs:", retrieved_docs)
 
+    # 3. Build context string
+    context_parts = []
+    print("Query Name is:", query.name)
+    if query.name:
+        context_parts.append(f"My name is {query.name}.")
+
+    context_parts.extend([doc.page_content for doc in retrieved_docs])
+    full_context = "\n".join(context_parts)
+
     if not retrieved_docs:
         print("I'm you, I don't have anything to say about that")
+        return {"Response": "I'm you, I don't have anything to say about that"}
 
-    response = qa_chain.invoke(query.question)
-    print("Response:", response["result"])
+    # 4. Use the prompt manually via LLMChain or invoke method
+    prompt_chain = chat_prompt | llm
 
+    response = prompt_chain.invoke({
+        "context": full_context,
+        "question": query.question
+    })
+
+    print("Response:", response)
+
+    # 5. Embed and store in Qdrant
     question_embedding = embedding_model.embed_query(query.question)
-    answer_embedding = embedding_model.embed_query(response["result"])
+    answer_embedding = embedding_model.embed_query(response)
 
     question_point = PointStruct(
         id=str(uuid4()),
@@ -278,7 +294,7 @@ def ask_parallel(query: Query):
             "type": "chat",
             "answer": "answer",
             "userId": query.user_id,
-            "text": response["result"],
+            "text": response,
             "timestamp": int(time() * 1000),
             "name": query.name,
             "location": query.location
@@ -295,7 +311,7 @@ def ask_parallel(query: Query):
     )
     print(f"Total points in Qdrant: {count.count}")
 
-    return {"Response": response["result"]}
+    return {"Response": response}
 
 
 @app.post("/journal_entry")
@@ -565,3 +581,93 @@ Write **only** the journal of their parallel self. Do not label it or explain it
                   points=[daily_journal_point])
 
     return {"daily_journal": generated_journal}
+
+
+@app.post("/ask_parallel")
+def ask_parallel(query: Query):
+
+    # 1. Prepare the retriever
+    retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="type", match=MatchAny(
+                        any=["journal", "initial", "chat"])),
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=query.user_id)),
+                ]
+            ),
+            "k": 40
+        }
+    )
+
+    # 2. Get documents manually
+    retrieved_docs = retriever.get_relevant_documents(query.question)
+    print("Retrieved Docs:", retrieved_docs)
+
+    # 3. Build context string
+    context_parts = []
+    print("Query Name is:", query.name)
+    if query.name:
+        context_parts.append(f"My name is {query.name}.")
+
+    context_parts.extend([doc.page_content for doc in retrieved_docs])
+    full_context = "\n".join(context_parts)
+
+    if not retrieved_docs:
+        print("I'm you, I don't have anything to say about that")
+        return {"Response": "I'm you, I don't have anything to say about that"}
+
+    # 4. Use the prompt manually via LLMChain or invoke method
+    prompt_chain = chat_prompt | llm
+
+    response = prompt_chain.invoke({
+        "context": full_context,
+        "question": query.question
+    })
+
+    print("Response:", response)
+
+    # 5. Embed and store in Qdrant
+    question_embedding = embedding_model.embed_query(query.question)
+    answer_embedding = embedding_model.embed_query(response)
+
+    question_point = PointStruct(
+        id=str(uuid4()),
+        vector=question_embedding,
+        payload={
+            "type": "chat",
+            "question": "question",
+            "userId": query.user_id,
+            "text": query.question,
+            "timestamp": int(time() * 1000),
+            "name": query.name,
+            "location": query.location
+        }
+    )
+
+    answer_point = PointStruct(
+        id=str(uuid4()),
+        vector=answer_embedding,
+        payload={
+            "type": "chat",
+            "answer": "answer",
+            "userId": query.user_id,
+            "text": response,
+            "timestamp": int(time() * 1000),
+            "name": query.name,
+            "location": query.location
+        }
+    )
+
+    qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[question_point, answer_point]
+    )
+    count = qdrant.count(
+        collection_name=COLLECTION_NAME,
+        exact=True
+    )
+    print(f"Total points in Qdrant: {count.count}")
+
+    return {"Response": response}
