@@ -14,7 +14,7 @@ from langchain_core.runnables import RunnableSequence
 
 from fastapi import FastAPI, Request
 from models.query_model import Query
-from models.journal_model import Journal
+from models.journal_model import Journal, JournalEdit
 from models.DailyInsight import DailyInsight
 from middlewares.cors import setup_cors
 from datetime import datetime, timedelta
@@ -221,7 +221,7 @@ llm = GoogleGenerativeAI(
     api_key=os.getenv("GOOGLE_API_KEY")
 )
 
-print(qdrant.get_collections())
+# AI Chat API
 
 
 @app.post("/ask")
@@ -313,6 +313,8 @@ def ask_parallel(query: Query):
 
     return {"Response": response}
 
+# New Journal Entry API
+
 
 @app.post("/journal_entry")
 def ask_parallel(journal: Journal):
@@ -321,8 +323,10 @@ def ask_parallel(journal: Journal):
 
     journal_embedding = embedding_model.embed_query(journal.data)
 
+    journal_point_id = str(uuid4())
+    print("Journal Point ID:", journal_point_id)
     journal_point = PointStruct(
-        id=str(uuid4()),
+        id=journal_point_id,
         vector=journal_embedding,
         payload={
             "userId": journal.user_id,
@@ -343,10 +347,38 @@ def ask_parallel(journal: Journal):
     )
     print(f"Total points in Qdrant: {count.count}")
 
-    return {"journal": journal.data}
+    return {
+        "journal": journal.data,
+        "point_id": journal_point_id
+    }
+
+# Update Journal Entry API
 
 
-# ----- REFLECTION API -----
+@app.put("/edit_journal_entry")
+def edit_journal(entry: JournalEdit):
+    new_vector = embedding_model.embed_query(entry.new_text)
+    print("edited journal is:", entry.new_text)
+
+    updated_point = PointStruct(
+        id=entry.point_id,
+        vector=new_vector,
+        payload={
+            "userId": entry.user_id,
+            "type": "journal",
+            "date": datetime.now().strftime("%Y-%m-%d"),  # you can keep or override
+            "text": entry.new_text,
+            "timestamp": int(time() * 1000),
+        }
+    )
+    qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[updated_point]
+    )
+    return {"message": "Journal updated", "text": entry.new_text}
+
+
+# Reflection API
 @app.post("/reflections")
 def generate_reflection(insight: DailyInsight):
     context = ""
@@ -443,10 +475,27 @@ def generate_mantra(insight: DailyInsight):
 
     return {"mantra": response["result"]}
 
+# Daily Journal API
+
 
 @app.post("/daily_journal")
 def generate_daily_summary_journal(insight: DailyInsight):
     user_id = insight.user_id
+    today_date = datetime.now().strftime("%Y-%m-%d")
+
+    # --- Step 1: Check if today's journal exists ---
+    existing = vectorstore.similarity_search_with_score(
+        query="today's journal entry",
+        k=1,
+        filter=Filter(
+            must=[
+                FieldCondition(key="userId", match=MatchValue(value=user_id)),
+                FieldCondition(key="type", match=MatchValue(
+                    value="Daily Journal")),
+                FieldCondition(key="date", match=MatchValue(value=today_date)),
+            ]
+        )
+    )
 
     # --- Fetch Initial Data ---
     initial_retriever = vectorstore.as_retriever(
