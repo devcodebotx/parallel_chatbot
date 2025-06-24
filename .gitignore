@@ -57,3 +57,4 @@ htmlcov/
 journal_entry.py
 insights.py
 Prompt to Gemini.lua
+parallel.py

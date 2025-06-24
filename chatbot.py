@@ -68,6 +68,12 @@ qdrant.create_payload_index(
     field_schema="keyword",
 )
 
+qdrant.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="is_subscribed",
+    field_schema="bool"
+)
+
 # Embedding model
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
@@ -93,9 +99,9 @@ def get_previous_day():
 
 def fetch_previous_journal(user_id: str | None):
     must_conditions = [
-        FieldCondition(key="type", match=MatchAny(any=["journal"])),
-        FieldCondition(key="date", match=MatchValue(
-            value=get_previous_day()))
+        FieldCondition(key="type", match=MatchAny(any=["initial"])),
+        # FieldCondition(key="date", match=MatchValue(
+        #     value=get_previous_day()))
     ]
     if user_id:
         must_conditions.append(FieldCondition(
@@ -104,7 +110,7 @@ def fetch_previous_journal(user_id: str | None):
     return vectorstore.as_retriever(
         search_kwargs={
             "filter": Filter(must=must_conditions),
-            "k": 1
+            "k": 30
         }
     )
 
@@ -166,24 +172,39 @@ Final Output:
 reflection_prompt = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-You are the user's *parallel self*, living the version of life they once imagined but didn’t pursue.
+You are the user's *parallel self*, living in an alternate version of their life — the version they **once wanted**, **imagined**, or **almost chose**, but never actually lived.
 
-You’ve been journaling daily based on that alternate path — the version where the user did what they once said they wanted to do.
+The user has answered a set of deep reflection questions. These responses include:
+- Things they almost did but didn’t  
+- Who they wanted to become  
+- Paths they were tempted by  
+- Personal values and dreams  
+- Emotional patterns or fears  
 
-Context:
+Important rules for generating the reflection:
+
+1. **Only use the user's own data** — do not add your own imagination or unrelated content.
+2. Carefully reflect on what the user’s alternate self experienced **yesterday** in this parallel life.
+3. The reflection should be about:
+   - Emotions felt during the day
+   - Specific moments, memories, or realizations
+   - Subtle shifts in mindset or self-awareness
+4. Speak in **first person** ("I") — this is the user talking.
+5. This reflection is from the **alternate version of the user**, not the real one.
+6. Keep the tone **raw, intimate, and grounded** — not motivational or vague.
+7. Do **not** include dates, names, or explanations.
+8. Do **not** repeat previous reflections. Each reflection should reveal a new layer, with new words and different starting lines.
+9. Keep it short but deep — **3 to 5 sentences** max.
+
+⚠️ Do not invent anything outside the user’s given data.
+
+🎯 Your goal is to write a **personal reflection** from the user's parallel self — grounded in what they said they *wanted*, *dreamt of*, or *almost did*.
+
+User context:
 {context}
 
-Now reflect honestly on *yesterday’s experience* in that parallel life.
-
-Instructions:
-1. Speak **as the user**, using “I”.
-2. Reflect on **emotions, moments, realizations, or struggles** you had yesterday.
-3. Do not repeat earlier reflections — use a new lens.
-4. Avoid generic life advice. Make it personal, raw, and grounded in the user's known data.
-5. Length: 3-4 emotionally meaningful sentences.
-
 Final Output:
-Write only the reflection from this parallel version of the user. Do not add context or labels.
+Write **only** the reflection of the user’s parallel self. Do not add context or labels.
 """
 )
 
@@ -382,45 +403,82 @@ def edit_journal(entry: JournalEdit):
 @app.post("/reflections")
 def generate_reflection(insight: DailyInsight):
     context = ""
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    subscription_status = insight.is_Subscribed
+    retriever = None
 
-    if insight.is_Subscribed:
-        ref_retriever = fetch_previous_journal(insight.user_id)
-        docs = ref_retriever.get_relevant_documents("yesterday's journal")
+    # Step 1: Check if reflection exists for today with same subscription status
+    existing_reflection = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(
+                        key="type", match=MatchValue(value="reflection")),
+                    FieldCondition(
+                        key="date", match=MatchValue(value=today_date)),
+                    FieldCondition(key="is_subscribed", match=MatchValue(
+                        value=subscription_status))
+                ]
+            ),
+            "k": 1
+        }
+    ).get_relevant_documents("today's reflection")
+
+    if existing_reflection:
+        print("reflection already exists for today")
+        return {"reflection": existing_reflection[0].page_content}
+
+    # Step 2: Generate Context
+    if subscription_status:
+        retriever = fetch_previous_journal(insight.user_id)
+        docs = retriever.get_relevant_documents("yesterday's journal")
         context = docs[0].page_content if docs else "The user is evolving through daily thoughts."
+        print("Retrieved Docs for Reflection:", docs)
         print("Journal Context for Reflection:", context)
     else:
         context = "The user is navigating life with awareness."
+        retriever = vectorstore.as_retriever(
+            search_kwargs={"filter": Filter(must=[])})
 
     print("context of refletion is: ", context)
+
+    # Step 3: Generate Mantra using LLM
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
-        retriever=ref_retriever,
+        retriever=retriever,
         chain_type="stuff",
         chain_type_kwargs={"prompt": reflection_prompt},
         input_key="question"
     )
-    print("Retrieved Docs for Reflection:", docs)
 
     response = qa_chain.invoke({
         "context": context,
-        "question": "Reflect on yesterday's journal entry and share your thoughts."
+        "question": "Reflect on yesterday's journal entry and give me a short reflection. "
     })
-    reflection_text = response["result"]
 
-    if insight.is_Subscribed:
-        reflection_point = PointStruct(
-            id=str(uuid4()),
-            vector=embedding_model.embed_query(reflection_text),
-            payload={
-                "type": "reflection",
-                "userId": insight.user_id,
-                "text": reflection_text,
-                "date": datetime.now().strftime("%Y-%m-%d"),
-                "timestamp": int(time() * 1000),
-            }
-        )
-        qdrant.upsert(collection_name=COLLECTION_NAME,
-                      points=[reflection_point])
+    reflection_text = response["result"]
+    print("subscription status is:", subscription_status)
+
+    # Step 4: Save in Qdrant
+    qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[
+            PointStruct(
+                id=str(uuid4()),
+                vector=embedding_model.embed_query(reflection_text),
+                payload={
+                    "type": "reflection",
+                    "userId": insight.user_id,
+                    "text": reflection_text,
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "timestamp": int(time() * 1000),
+                    "is_subscribed": subscription_status
+                }
+            )
+        ]
+    )
 
     return {"Response": reflection_text}
 
@@ -428,18 +486,45 @@ def generate_reflection(insight: DailyInsight):
 # Mantra API
 @app.post("/mantra")
 def generate_mantra(insight: DailyInsight):
-    context = ""
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    subscription_status = insight.is_Subscribed
+    retriever = None
 
-    if insight.is_Subscribed:
+    # Step 1: Check if mantra exists for today with same subscription status
+    existing_mantra = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(
+                        key="type", match=MatchValue(value="mantra")),
+                    FieldCondition(
+                        key="date", match=MatchValue(value=today_date)),
+                    FieldCondition(key="is_subscribed", match=MatchValue(
+                        value=subscription_status))
+                ]
+            ),
+            "k": 1
+        }
+    ).get_relevant_documents("today's mantra")
+
+    if existing_mantra:
+        print("Mantra already exists for today")
+        return {"mantra": existing_mantra[0].page_content}
+
+    # Step 2: Generate Context
+    if subscription_status:
         retriever = fetch_previous_journal(insight.user_id)
-        context_docs = retriever.get_relevant_documents(
-            "yesterday's mantra")
-        context = context_docs[0].page_content if context_docs else "The user is evolving through their thoughts."
-        print("Retrieved Docs for Mantra:", context_docs)
-
+        docs = retriever.get_relevant_documents("yesterday's journal")
+        context = docs[0].page_content if docs else "The user is evolving through their thoughts."
     else:
         context = "The user is growing through small efforts each day."
+        retriever = vectorstore.as_retriever(
+            search_kwargs={"filter": Filter(must=[])})
 
+    print("Context for Mantra:", context)
+    # Step 3: Generate Mantra using LLM
     chain = RetrievalQA.from_chain_type(
         llm=llm,
         retriever=retriever,
@@ -447,33 +532,35 @@ def generate_mantra(insight: DailyInsight):
         chain_type_kwargs={"prompt": mantra_prompt},
         input_key="question"
     )
-    print("context of mantra is: ", context)
-
+    print("Retrieved Docs for mantra:", docs)
     response = chain.invoke({
         "context": context,
         "question": "Give me today's mantra from yesterday's journal."
     })
-    if insight.is_Subscribed:
-        vector = embedding_model.embed_query(response["result"])
-        if insight.user_id:
-            qdrant.upsert(
-                collection_name=COLLECTION_NAME,
-                points=[
-                    PointStruct(
-                        id=str(uuid4()),
-                        vector=vector,
-                        payload={
-                            "type": "mantra",
-                            "userId": insight.user_id,
-                            "text": response["result"],
-                            "timestamp": int(time() * 1000),
-                            "date": datetime.now().strftime("%Y-%m-%d"),
-                        }
-                    )
-                ]
-            )
 
-    return {"mantra": response["result"]}
+    mantra_text = response["result"]
+    print("subscription status is:", subscription_status)
+
+    # Step 4: Save in Qdrant
+    qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[
+            PointStruct(
+                id=str(uuid4()),
+                vector=embedding_model.embed_query(mantra_text),
+                payload={
+                    "type": "mantra",
+                    "userId": insight.user_id,
+                    "text": mantra_text,
+                    "timestamp": int(time() * 1000),
+                    "date": today_date,
+                    "is_subscribed": subscription_status
+                }
+            )
+        ]
+    )
+
+    return {"mantra": mantra_text}
 
 # Daily Journal API
 
