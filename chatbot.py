@@ -98,11 +98,11 @@ def get_previous_day():
 # SHARED FUNCTION
 
 def fetch_previous_journal(user_id: str | None):
-    yesterday_date = "2025-06-23"
+    # yesterday_date = "2025-06-23"
     must_conditions = [
         FieldCondition(key="type", match=MatchAny(any=["journal"])),
         FieldCondition(key="date", match=MatchValue(
-            value=yesterday_date))
+            value=get_previous_day()))
     ]
     if user_id:
         must_conditions.append(FieldCondition(
