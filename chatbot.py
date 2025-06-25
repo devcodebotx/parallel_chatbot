@@ -98,10 +98,11 @@ def get_previous_day():
 # SHARED FUNCTION
 
 def fetch_previous_journal(user_id: str | None):
+    yesterday_date = "2025-06-23"
     must_conditions = [
-        FieldCondition(key="type", match=MatchAny(any=["initial"])),
-        # FieldCondition(key="date", match=MatchValue(
-        #     value=get_previous_day()))
+        FieldCondition(key="type", match=MatchAny(any=["journal"])),
+        FieldCondition(key="date", match=MatchValue(
+            value=yesterday_date))
     ]
     if user_id:
         must_conditions.append(FieldCondition(
@@ -184,21 +185,16 @@ The user has answered a set of deep reflection questions. These responses includ
 Important rules for generating the reflection:
 
 1. **Only use the user's own data** — do not add your own imagination or unrelated content.
-2. Carefully reflect on what the user’s alternate self experienced **yesterday** in this parallel life.
-3. The reflection should be about:
+2. Reflect deeply on what yesterday meant in this alternate life. 
+3. Focus on emotional or thematic significance — avoid restating events.
    - Emotions felt during the day
-   - Specific moments, memories, or realizations
-   - Subtle shifts in mindset or self-awareness
 4. Speak in **first person** ("I") — this is the user talking.
-5. This reflection is from the **alternate version of the user**, not the real one.
-6. Keep the tone **raw, intimate, and grounded** — not motivational or vague.
-7. Do **not** include dates, names, or explanations.
-8. Do **not** repeat previous reflections. Each reflection should reveal a new layer, with new words and different starting lines.
-9. Keep it short but deep — **3 to 5 sentences** max.
+5. Do **not** include names, dates, or external facts.
+6. Do **not** repeat previous reflections.
+7. Keep the tone **raw, abstract, or metaphorical** — as if it's a journaled insight.
+8. Make it **very short**: **1–2 sentences** max.
 
-⚠️ Do not invent anything outside the user’s given data.
-
-🎯 Your goal is to write a **personal reflection** from the user's parallel self — grounded in what they said they *wanted*, *dreamt of*, or *almost did*.
+🎯 Think: What does this moment *mean* — not what happened.
 
 User context:
 {context}
@@ -404,6 +400,7 @@ def edit_journal(entry: JournalEdit):
 def generate_reflection(insight: DailyInsight):
     context = ""
     today_date = datetime.now().strftime("%Y-%m-%d")
+    # today_date = "2025-06-23"
     subscription_status = insight.is_Subscribed
     retriever = None
 
@@ -570,19 +567,26 @@ def generate_daily_summary_journal(insight: DailyInsight):
     user_id = insight.user_id
     today_date = datetime.now().strftime("%Y-%m-%d")
 
-    # --- Step 1: Check if today's journal exists ---
-    existing = vectorstore.similarity_search_with_score(
-        query="today's journal entry",
-        k=1,
-        filter=Filter(
-            must=[
-                FieldCondition(key="userId", match=MatchValue(value=user_id)),
-                FieldCondition(key="type", match=MatchValue(
-                    value="Daily Journal")),
-                FieldCondition(key="date", match=MatchValue(value=today_date)),
-            ]
-        )
-    )
+    # 1. Check if today's journal already exists
+    existing_journal = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(key="type", match=MatchValue(
+                        value="Daily Journal")),
+                    FieldCondition(
+                        key="date", match=MatchValue(value=today_date))
+                ]
+            ),
+            "k": 1
+        }
+    ).get_relevant_documents("today's journal")
+
+    if existing_journal:
+        print("Journal already exists for today")
+        return {"daily_journal": existing_journal[0].page_content}
 
     # --- Fetch Initial Data ---
     initial_retriever = vectorstore.as_retriever(
