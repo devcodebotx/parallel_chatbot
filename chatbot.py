@@ -515,6 +515,7 @@ def generate_mantra(insight: DailyInsight):
         retriever = fetch_previous_journal(insight.user_id)
         docs = retriever.get_relevant_documents("yesterday's journal")
         context = docs[0].page_content if docs else "The user is evolving through their thoughts."
+        print("Retrieved Docs for mantra:", docs)
     else:
         context = "The user is growing through small efforts each day."
         retriever = vectorstore.as_retriever(
@@ -529,7 +530,6 @@ def generate_mantra(insight: DailyInsight):
         chain_type_kwargs={"prompt": mantra_prompt},
         input_key="question"
     )
-    print("Retrieved Docs for mantra:", docs)
     response = chain.invoke({
         "context": context,
         "question": "Give me today's mantra from yesterday's journal."
