@@ -93,9 +93,10 @@ vectorstore = Qdrant(
 # ----- UTILS -----
 def get_previous_day():
     return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-
+    # return "2025-07-02"
 
 # SHARED FUNCTION
+
 
 def fetch_previous_journal(user_id: str | None):
     # yesterday_date = "2025-06-23"
@@ -175,7 +176,7 @@ reflection_prompt = PromptTemplate(
     template="""
 You are the user's *parallel self*, living in an alternate version of their life — the version they **once wanted**, **imagined**, or **almost chose**, but never actually lived.
 
-The user has answered a set of deep reflection questions. These responses include:
+The user has written a journal about today. This journal include:
 - Things they almost did but didn’t  
 - Who they wanted to become  
 - Paths they were tempted by  
@@ -201,8 +202,10 @@ User context:
 
 Final Output:
 Write **only** the reflection of the user’s parallel self. Do not add context or labels.
+
 """
 )
+
 
 # Prompt for Mantra
 mantra_prompt = PromptTemplate(
@@ -220,7 +223,7 @@ Your job is to generate a **short daily mantra (one sentence)** that speaks from
 
 Instructions:
 1. The mantra must reflect what their alternate self would need to *remind themselves of today*.
-2. Speak **as the user**, using “I”, not “you”.
+
 3. Do **not** repeat earlier mantras — use a **fresh perspective or emotional insight**.
 4. Keep it short (1 sentence), real, grounded, and emotionally resonant.
 5. Do **not add unrelated or general affirmations**. Stay strictly based on the user's past responses.
@@ -233,9 +236,17 @@ Write only the mantra. No explanation. No quotes.
 """
 )
 
+# 2. Speak **as the user**, using “I”, not “you”.
+
 llm = GoogleGenerativeAI(
-    model="gemini-1.5-flash",
-    api_key=os.getenv("GOOGLE_API_KEY")
+    model="gemini-2.0-flash",
+    api_key=os.getenv("GOOGLE_API_KEY"),
+    temperature=0.95,
+    top_k=50,
+    top_p=0.99,
+    frequency_penalty=1.2,
+    presence_penalty=1.0,
+    max_output_tokens=150,
 )
 
 # AI Chat API
