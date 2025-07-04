@@ -93,13 +93,12 @@ vectorstore = Qdrant(
 # ----- UTILS -----
 def get_previous_day():
     return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    # return "2025-07-02"
+    # return "2025-07-03"
 
 # SHARED FUNCTION
 
 
 def fetch_previous_journal(user_id: str | None):
-    # yesterday_date = "2025-06-23"
     must_conditions = [
         FieldCondition(key="type", match=MatchAny(any=["journal"])),
         FieldCondition(key="date", match=MatchValue(
@@ -129,7 +128,7 @@ The user has answered a set of deep reflection questions. These responses includ
 - Personal values and dreams  
 - Emotional patterns or fears  
 
-🧠 Important rules for responding to the user's question:
+Important rules for responding to the user's question:
 
 1. **Only use the user's own data** — do not add your own imagination or unrelated content.
 - Use metadata of this user and their different types of entries (chat, journal, initial)
@@ -148,14 +147,14 @@ The user has answered a set of deep reflection questions. These responses includ
 10. Do not repeat any previous answer — use new words, a different emotional tone, and a fresh perspective each time.
 
 
-🆕 Additional instructions for new users:
+dditional instructions for new users:
 - If the user has **no data in chat, journal, or entry journals**, and **only has initial data**, use the available initial data to answer.
 - If no meaningful data is found at all, respond with:  
   **"I'm you, I don't have anything to say about that."**
 - If only initial data is found, then say:
   **"I'm new to this, I don't have any data to answer this question. But I will try my best to answer it based on the initial data I have."**
 
-⚠️ Important for factual/general questions:
+Important for factual/general questions:
 - If the question is **factual or general** (e.g. about), use personal data. Just answer the question clearly and concisely.
 
 🎯 Goal:
@@ -165,7 +164,7 @@ User context:
 {context}
 
 Final Output:  
-🗣️ Now, answer this question as their parallel self:  
+ Now, answer this question as their parallel self:  
 {question}
 """
 )
@@ -176,7 +175,7 @@ reflection_prompt = PromptTemplate(
     template="""
 You are the user's *parallel self*, living in an alternate version of their life — the version they **once wanted**, **imagined**, or **almost chose**, but never actually lived.
 
-The user has written a journal about today. This journal include:
+The user has written a journal. This journal include:
 - Things they almost did but didn’t  
 - Who they wanted to become  
 - Paths they were tempted by  
@@ -194,10 +193,13 @@ Important rules for generating the reflection:
 6. Do **not** repeat previous reflections.
 7. Keep the tone **raw, abstract, or metaphorical** — as if it's a journaled insight.
 8. Make it **very short**: **1–2 sentences** max.
+9. Do not use **today** in the start of the reflection.
+10. Do not repeat **The**, **that** in the start of the reflection.
 
 🎯 Think: What does this moment *mean* — not what happened.
 
 User context:
+
 {context}
 
 Final Output:
@@ -222,12 +224,13 @@ The user’s past reflections (initial answers, journals, chats) reveal:
 Your job is to generate a **short daily mantra (one sentence)** that speaks from the user's *parallel self* — someone who **did follow through** with those choices.
 
 Instructions:
-1. The mantra must reflect what their alternate self would need to *remind themselves of today*.
+1. The mantra must reflect what their alternate self would need to *remind themselves*.
 
 3. Do **not** repeat earlier mantras — use a **fresh perspective or emotional insight**.
 4. Keep it short (1 sentence), real, grounded, and emotionally resonant.
 5. Do **not add unrelated or general affirmations**. Stay strictly based on the user's past responses.
-
+6. Do not use **today** in the start of the mantra.
+7. Do not repeat **The**, **that** in the start of the mantra.
 Context:
 {context}
 
@@ -244,8 +247,8 @@ llm = GoogleGenerativeAI(
     temperature=0.95,
     top_k=50,
     top_p=0.99,
-    frequency_penalty=1.2,
-    presence_penalty=1.0,
+    frequency_penalty=1.4,
+    presence_penalty=1.4,
     max_output_tokens=150,
 )
 
