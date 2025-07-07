@@ -582,25 +582,25 @@ def generate_daily_summary_journal(insight: DailyInsight):
     today_date = datetime.now().strftime("%Y-%m-%d")
 
     # 1. Check if today's journal already exists
-    existing_journal = vectorstore.as_retriever(
-        search_kwargs={
-            "filter": Filter(
-                must=[
-                    FieldCondition(key="userId", match=MatchValue(
-                        value=insight.user_id)),
-                    FieldCondition(key="type", match=MatchValue(
-                        value="Daily Journal")),
-                    FieldCondition(
-                        key="date", match=MatchValue(value=today_date))
-                ]
-            ),
-            "k": 1
-        }
-    ).get_relevant_documents("today's journal")
+    # existing_journal = vectorstore.as_retriever(
+    #     search_kwargs={
+    #         "filter": Filter(
+    #             must=[
+    #                 FieldCondition(key="userId", match=MatchValue(
+    #                     value=insight.user_id)),
+    #                 FieldCondition(key="type", match=MatchValue(
+    #                     value="Daily Journal")),
+    #                 FieldCondition(
+    #                     key="date", match=MatchValue(value=today_date))
+    #             ]
+    #         ),
+    #         "k": 1
+    #     }
+    # ).get_relevant_documents("today's journal")
 
-    if existing_journal:
-        print("Journal already exists for today")
-        return {"daily_journal": existing_journal[0].page_content}
+    # if existing_journal:
+    #     print("Journal already exists for today")
+    #     return {"daily_journal": existing_journal[0].page_content}
 
     # --- Fetch Initial Data ---
     initial_retriever = vectorstore.as_retriever(
@@ -688,8 +688,9 @@ Important rules for generating the parallel journal:
 6. Don't add any date to the journal.
 7. don't show any character's name, show the relation like "mother", "mom", "my mother", "my father", "my friend", "my mother" etc.
 8. do not repeat the same content, if you have already written one journal earlier, then now try again with a new lens and new words and new starting word. Focus on a different emotional angle or a new realization. Don’t repeat earlier journal.
-10. must generate the parallel journal in at least **three paragraphs**
-9. Do not add the same starting words and lines on each journal, must change the starting words and lines.
+9. must generate the parallel journal in at least **three paragraphs**
+10. start the fist line with the phrase **'Dear Self,'** .
+
 
 
 ⚠️ Do not use imagination beyond the user’s data. If the user didn’t mention something, don’t assume it.
@@ -707,6 +708,7 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 
 # Write **only** the 3-paragraph  journal of their parallel self. Do not label it or explain it. Just output the journal entry.
 # which must contains 3 paragraphs
+# Do not add the same starting words and lines on each journal after the **'Dear Self,'** phrase
 
     # chain = RetrievalQA.from_chain_type(
     #     llm=llm,
@@ -724,18 +726,18 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 
     generated_journal = response
 
-    daily_journal_point = PointStruct(
-        id=str(uuid4()),
-        vector=embedding_model.embed_query(generated_journal),
-        payload={
-            "type": "Daily Journal",
-            "userId": insight.user_id or "anonymous",
-            "text": generated_journal,
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "timestamp": int(time() * 1000),
-        }
-    )
-    qdrant.upsert(collection_name=COLLECTION_NAME,
-                  points=[daily_journal_point])
+    # daily_journal_point = PointStruct(
+    #     id=str(uuid4()),
+    #     vector=embedding_model.embed_query(generated_journal),
+    #     payload={
+    #         "type": "Daily Journal",
+    #         "userId": insight.user_id or "anonymous",
+    #         "text": generated_journal,
+    #         "date": datetime.now().strftime("%Y-%m-%d"),
+    #         "timestamp": int(time() * 1000),
+    #     }
+    # )
+    # qdrant.upsert(collection_name=COLLECTION_NAME,
+    #               points=[daily_journal_point])
 
-    return {"daily_journal": generated_journal}
+    return {"daily_journal": {generated_journal}}
