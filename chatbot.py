@@ -582,25 +582,25 @@ def generate_daily_summary_journal(insight: DailyInsight):
     today_date = datetime.now().strftime("%Y-%m-%d")
 
     # 1. Check if today's journal already exists
-    # existing_journal = vectorstore.as_retriever(
-    #     search_kwargs={
-    #         "filter": Filter(
-    #             must=[
-    #                 FieldCondition(key="userId", match=MatchValue(
-    #                     value=insight.user_id)),
-    #                 FieldCondition(key="type", match=MatchValue(
-    #                     value="Daily Journal")),
-    #                 FieldCondition(
-    #                     key="date", match=MatchValue(value=today_date))
-    #             ]
-    #         ),
-    #         "k": 1
-    #     }
-    # ).get_relevant_documents("today's journal")
+    existing_journal = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(key="type", match=MatchValue(
+                        value="Daily Journal")),
+                    FieldCondition(
+                        key="date", match=MatchValue(value=today_date))
+                ]
+            ),
+            "k": 1
+        }
+    ).get_relevant_documents("today's journal")
 
-    # if existing_journal:
-    #     print("Journal already exists for today")
-    #     return {"daily_journal": existing_journal[0].page_content}
+    if existing_journal:
+        print("Journal already exists for today")
+        return {"daily_journal": existing_journal[0].page_content}
 
     # --- Fetch Initial Data ---
     initial_retriever = vectorstore.as_retriever(
@@ -710,13 +710,6 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 # which must contains 3 paragraphs
 # Do not add the same starting words and lines on each journal after the **'Dear Self,'** phrase
 
-    # chain = RetrievalQA.from_chain_type(
-    #     llm=llm,
-    #     retriever=combined_context,
-    #     chain_type="stuff",
-    #     chain_type_kwargs={"prompt": daily_journal_prompt},
-    #     input_key="context"
-    # )
     chain = daily_journal_prompt | llm
 
     response = chain.invoke({
@@ -724,20 +717,20 @@ Write **only** the journal of their parallel self. Do not label it or explain it
         # "question": "What do you fear losing the most?"
     })
 
-    generated_journal = response
+    generated_journal = response["result"]
 
-    # daily_journal_point = PointStruct(
-    #     id=str(uuid4()),
-    #     vector=embedding_model.embed_query(generated_journal),
-    #     payload={
-    #         "type": "Daily Journal",
-    #         "userId": insight.user_id or "anonymous",
-    #         "text": generated_journal,
-    #         "date": datetime.now().strftime("%Y-%m-%d"),
-    #         "timestamp": int(time() * 1000),
-    #     }
-    # )
-    # qdrant.upsert(collection_name=COLLECTION_NAME,
-    #               points=[daily_journal_point])
+    daily_journal_point = PointStruct(
+        id=str(uuid4()),
+        vector=embedding_model.embed_query(generated_journal),
+        payload={
+            "type": "Daily Journal",
+            "userId": insight.user_id or "anonymous",
+            "text": generated_journal,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "timestamp": int(time() * 1000),
+        }
+    )
+    qdrant.upsert(collection_name=COLLECTION_NAME,
+                  points=[daily_journal_point])
 
     return {"daily_journal": {generated_journal}}
