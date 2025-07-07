@@ -150,3 +150,93 @@ while True:
 
     response = qa_chain.invoke(input_text)
     print(response["result"])
+
+
+@app.post("/ask_parallel")
+def ask_parallel(query: Query):
+
+    # 1. Prepare the retriever
+    retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="type", match=MatchAny(
+                        any=["journal", "initial", "chat"])),
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=query.user_id)),
+                ]
+            ),
+            "k": 40
+        }
+    )
+
+    # 2. Get documents manually
+    retrieved_docs = retriever.get_relevant_documents(query.question)
+    print("Retrieved Docs:", retrieved_docs)
+
+    # 3. Build context string
+    context_parts = []
+    print("Query Name is:", query.name)
+    if query.name:
+        context_parts.append(f"My name is {query.name}.")
+
+    context_parts.extend([doc.page_content for doc in retrieved_docs])
+    full_context = "\n".join(context_parts)
+
+    if not retrieved_docs:
+        print("I'm you, I don't have anything to say about that")
+        return {"Response": "I'm you, I don't have anything to say about that"}
+
+    # 4. Use the prompt manually via LLMChain or invoke method
+    prompt_chain = chat_prompt | llm
+
+    response = prompt_chain.invoke({
+        "context": full_context,
+        "question": query.question
+    })
+
+    print("Response:", response)
+
+    # 5. Embed and store in Qdrant
+    question_embedding = embedding_model.embed_query(query.question)
+    answer_embedding = embedding_model.embed_query(response)
+
+    question_point = PointStruct(
+        id=str(uuid4()),
+        vector=question_embedding,
+        payload={
+            "type": "chat",
+            "question": "question",
+            "userId": query.user_id,
+            "text": query.question,
+            "timestamp": int(time() * 1000),
+            "name": query.name,
+            "location": query.location
+        }
+    )
+
+    answer_point = PointStruct(
+        id=str(uuid4()),
+        vector=answer_embedding,
+        payload={
+            "type": "chat",
+            "answer": "answer",
+            "userId": query.user_id,
+            "text": response,
+            "timestamp": int(time() * 1000),
+            "name": query.name,
+            "location": query.location
+        }
+    )
+
+    qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[question_point, answer_point]
+    )
+    count = qdrant.count(
+        collection_name=COLLECTION_NAME,
+        exact=True
+    )
+    print(f"Total points in Qdrant: {count.count}")
+
+    return {"Response": response}
