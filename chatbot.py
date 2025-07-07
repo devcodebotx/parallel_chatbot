@@ -710,14 +710,28 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 # which must contains 3 paragraphs
 # Do not add the same starting words and lines on each journal after the **'Dear Self,'** phrase
 
-    chain = daily_journal_prompt | llm
+    # chain = RetrievalQA.from_chain_type(
+    #     llm=llm,
+    #     retriever=combined_context,
+    #     chain_type="stuff",
+    #     chain_type_kwargs={"prompt": daily_journal_prompt},
+    #     # input_key="context"
+    # )
+
+    # chain = daily_journal_prompt | llm
+
+    chain = LLMChain(
+        llm=llm,
+        prompt=daily_journal_prompt
+    )
 
     response = chain.invoke({
         "context": combined_context,
         # "question": "What do you fear losing the most?"
     })
 
-    generated_journal = response["result"]
+    generated_journal = response["text"]
+    # generated_journal = {"text": response}
 
     daily_journal_point = PointStruct(
         id=str(uuid4()),
@@ -733,4 +747,4 @@ Write **only** the journal of their parallel self. Do not label it or explain it
     qdrant.upsert(collection_name=COLLECTION_NAME,
                   points=[daily_journal_point])
 
-    return {"daily_journal": {generated_journal}}
+    return {"daily_journal": {"text": generated_journal}}
