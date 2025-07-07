@@ -249,7 +249,7 @@ llm = GoogleGenerativeAI(
     top_p=0.99,
     frequency_penalty=1.4,
     presence_penalty=1.4,
-    max_output_tokens=150,
+    max_output_tokens=2048,
 )
 
 # AI Chat API
@@ -674,7 +674,6 @@ The user has answered a set of deep reflection questions. These responses includ
 - Emotional patterns or fears  
 
 Important rules for generating the parallel journal:
-
 1. **Only use the user's own data** — do not add your own imagination or unrelated content.
 2. Read the user’s answers **carefully** and detect:
    - What was their imagined or ideal life?
@@ -689,6 +688,7 @@ Important rules for generating the parallel journal:
 6. Don't add any date to the journal.
 7. don't show any character's name, show the relation like "mother", "mom", "my mother", "my father", "my friend", "my mother" etc.
 8. do not repeat the same content, if you have already written one journal earlier, then now try again with a new lens and new words and new starting word. Focus on a different emotional angle or a new realization. Don’t repeat earlier journal.
+10. must generate the parallel journal in at least **three paragraphs**
 9. Do not add the same starting words and lines on each journal, must change the starting words and lines.
 
 
@@ -701,8 +701,12 @@ User context:
 
 Final Output:
 Write **only** the journal of their parallel self. Do not label it or explain it. Just output the journal entry.
+
 """
     )
+
+# Write **only** the 3-paragraph  journal of their parallel self. Do not label it or explain it. Just output the journal entry.
+# which must contains 3 paragraphs
 
     # chain = RetrievalQA.from_chain_type(
     #     llm=llm,
@@ -735,93 +739,3 @@ Write **only** the journal of their parallel self. Do not label it or explain it
                   points=[daily_journal_point])
 
     return {"daily_journal": generated_journal}
-
-
-@app.post("/ask_parallel")
-def ask_parallel(query: Query):
-
-    # 1. Prepare the retriever
-    retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "filter": Filter(
-                must=[
-                    FieldCondition(key="type", match=MatchAny(
-                        any=["journal", "initial", "chat"])),
-                    FieldCondition(key="userId", match=MatchValue(
-                        value=query.user_id)),
-                ]
-            ),
-            "k": 40
-        }
-    )
-
-    # 2. Get documents manually
-    retrieved_docs = retriever.get_relevant_documents(query.question)
-    print("Retrieved Docs:", retrieved_docs)
-
-    # 3. Build context string
-    context_parts = []
-    print("Query Name is:", query.name)
-    if query.name:
-        context_parts.append(f"My name is {query.name}.")
-
-    context_parts.extend([doc.page_content for doc in retrieved_docs])
-    full_context = "\n".join(context_parts)
-
-    if not retrieved_docs:
-        print("I'm you, I don't have anything to say about that")
-        return {"Response": "I'm you, I don't have anything to say about that"}
-
-    # 4. Use the prompt manually via LLMChain or invoke method
-    prompt_chain = chat_prompt | llm
-
-    response = prompt_chain.invoke({
-        "context": full_context,
-        "question": query.question
-    })
-
-    print("Response:", response)
-
-    # 5. Embed and store in Qdrant
-    question_embedding = embedding_model.embed_query(query.question)
-    answer_embedding = embedding_model.embed_query(response)
-
-    question_point = PointStruct(
-        id=str(uuid4()),
-        vector=question_embedding,
-        payload={
-            "type": "chat",
-            "question": "question",
-            "userId": query.user_id,
-            "text": query.question,
-            "timestamp": int(time() * 1000),
-            "name": query.name,
-            "location": query.location
-        }
-    )
-
-    answer_point = PointStruct(
-        id=str(uuid4()),
-        vector=answer_embedding,
-        payload={
-            "type": "chat",
-            "answer": "answer",
-            "userId": query.user_id,
-            "text": response,
-            "timestamp": int(time() * 1000),
-            "name": query.name,
-            "location": query.location
-        }
-    )
-
-    qdrant.upsert(
-        collection_name=COLLECTION_NAME,
-        points=[question_point, answer_point]
-    )
-    count = qdrant.count(
-        collection_name=COLLECTION_NAME,
-        exact=True
-    )
-    print(f"Total points in Qdrant: {count.count}")
-
-    return {"Response": response}
