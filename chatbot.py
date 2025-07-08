@@ -93,11 +93,9 @@ vectorstore = Qdrant(
 # ----- UTILS -----
 def get_previous_day():
     return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    # return "2025-07-03"
-
-# SHARED FUNCTION
 
 
+# Shared Function to fetch previous journal entries
 def fetch_previous_journal(user_id: str | None):
     must_conditions = [
         FieldCondition(key="type", match=MatchAny(any=["journal"])),
@@ -116,6 +114,7 @@ def fetch_previous_journal(user_id: str | None):
     )
 
 
+# chat prompt
 chat_prompt = PromptTemplate(
     input_variables=["context", "question"],
     template="""
@@ -239,7 +238,6 @@ Write only the mantra. No explanation. No quotes.
 """
 )
 
-# 2. Speak **as the user**, using “I”, not “you”.
 
 llm = GoogleGenerativeAI(
     model="gemini-2.0-flash",
@@ -252,9 +250,8 @@ llm = GoogleGenerativeAI(
     max_output_tokens=2048,
 )
 
+
 # AI Chat API
-
-
 @app.post("/ask")
 def ask_parallel(query: Query):
 
@@ -275,11 +272,9 @@ def ask_parallel(query: Query):
 
     # 2. Get documents manually
     retrieved_docs = retriever.get_relevant_documents(query.question)
-    print("Retrieved Docs:", retrieved_docs)
 
     # 3. Build context string
     context_parts = []
-    print("Query Name is:", query.name)
     if query.name:
         context_parts.append(f"My name is {query.name}.")
 
@@ -287,7 +282,6 @@ def ask_parallel(query: Query):
     full_context = "\n".join(context_parts)
 
     if not retrieved_docs:
-        print("I'm you, I don't have anything to say about that")
         return {"Response": "I'm you, I don't have anything to say about that"}
 
     # 4. Use the prompt manually via LLMChain or invoke method
@@ -297,8 +291,6 @@ def ask_parallel(query: Query):
         "context": full_context,
         "question": query.question
     })
-
-    print("Response:", response)
 
     # 5. Embed and store in Qdrant
     question_embedding = embedding_model.embed_query(query.question)
@@ -340,22 +332,18 @@ def ask_parallel(query: Query):
         collection_name=COLLECTION_NAME,
         exact=True
     )
-    print(f"Total points in Qdrant: {count.count}")
 
     return {"Response": response}
 
+
 # New Journal Entry API
-
-
 @app.post("/journal_entry")
 def ask_parallel(journal: Journal):
-
-    print("journal is:", journal.data)
 
     journal_embedding = embedding_model.embed_query(journal.data)
 
     journal_point_id = str(uuid4())
-    print("Journal Point ID:", journal_point_id)
+
     journal_point = PointStruct(
         id=journal_point_id,
         vector=journal_embedding,
@@ -376,20 +364,17 @@ def ask_parallel(journal: Journal):
         collection_name=COLLECTION_NAME,
         exact=True
     )
-    print(f"Total points in Qdrant: {count.count}")
 
     return {
         "journal": journal.data,
         "point_id": journal_point_id
     }
 
+
 # Update Journal Entry API
-
-
 @app.put("/edit_journal_entry")
 def edit_journal(entry: JournalEdit):
     new_vector = embedding_model.embed_query(entry.new_text)
-    print("edited journal is:", entry.new_text)
 
     updated_point = PointStruct(
         id=entry.point_id,
@@ -397,7 +382,7 @@ def edit_journal(entry: JournalEdit):
         payload={
             "userId": entry.user_id,
             "type": "journal",
-            "date": datetime.now().strftime("%Y-%m-%d"),  # you can keep or override
+            "date": datetime.now().strftime("%Y-%m-%d"),
             "text": entry.new_text,
             "timestamp": int(time() * 1000),
         }
@@ -409,12 +394,11 @@ def edit_journal(entry: JournalEdit):
     return {"message": "Journal updated", "text": entry.new_text}
 
 
-# Reflection API
+# --Reflection API
 @app.post("/reflections")
 def generate_reflection(insight: DailyInsight):
     context = ""
     today_date = datetime.now().strftime("%Y-%m-%d")
-    # today_date = "2025-06-23"
     subscription_status = insight.is_Subscribed
     retriever = None
 
@@ -446,14 +430,11 @@ def generate_reflection(insight: DailyInsight):
         retriever = fetch_previous_journal(insight.user_id)
         docs = retriever.get_relevant_documents("yesterday's journal")
         context = docs[0].page_content if docs else "The user is evolving through daily thoughts."
-        print("Retrieved Docs for Reflection:", docs)
-        print("Journal Context for Reflection:", context)
+
     else:
         context = "The user is navigating life with awareness."
         retriever = vectorstore.as_retriever(
             search_kwargs={"filter": Filter(must=[])})
-
-    print("context of refletion is: ", context)
 
     # Step 3: Generate Mantra using LLM
     qa_chain = RetrievalQA.from_chain_type(
@@ -494,7 +475,7 @@ def generate_reflection(insight: DailyInsight):
     return {"Response": reflection_text}
 
 
-# Mantra API
+# --Mantra API
 @app.post("/mantra")
 def generate_mantra(insight: DailyInsight):
     today_date = datetime.now().strftime("%Y-%m-%d")
@@ -529,13 +510,12 @@ def generate_mantra(insight: DailyInsight):
         retriever = fetch_previous_journal(insight.user_id)
         docs = retriever.get_relevant_documents("yesterday's journal")
         context = docs[0].page_content if docs else "The user is evolving through their thoughts."
-        print("Retrieved Docs for mantra:", docs)
+
     else:
         context = "The user is growing through small efforts each day."
         retriever = vectorstore.as_retriever(
             search_kwargs={"filter": Filter(must=[])})
 
-    print("Context for Mantra:", context)
     # Step 3: Generate Mantra using LLM
     chain = RetrievalQA.from_chain_type(
         llm=llm,
@@ -573,9 +553,8 @@ def generate_mantra(insight: DailyInsight):
 
     return {"mantra": mantra_text}
 
+
 # Daily Journal API
-
-
 @app.post("/daily_journal")
 def generate_daily_summary_journal(insight: DailyInsight):
     user_id = insight.user_id
@@ -618,7 +597,6 @@ def generate_daily_summary_journal(insight: DailyInsight):
     )
     initial_docs = initial_retriever.get_relevant_documents(
         "initial questions and answers")
-    print("Initial Docs:", initial_docs)
 
     # --- Fetch Journal Data ---
     journal_retriever = vectorstore.as_retriever(
@@ -635,7 +613,6 @@ def generate_daily_summary_journal(insight: DailyInsight):
         }
     )
     journal_docs = journal_retriever.get_relevant_documents("past reflections")
-    print("Journal Docs:", journal_docs)
 
     # --- Fetch Chat Data ---
     chat_retriever = vectorstore.as_retriever(
@@ -651,14 +628,11 @@ def generate_daily_summary_journal(insight: DailyInsight):
         }
     )
     chat_docs = chat_retriever.get_relevant_documents("personal conversations")
-    print("Chat Docs:", chat_docs)
 
     # --- Combine All Documents ---
     all_docs = initial_docs + journal_docs + chat_docs
-    # print("Total Retrieved Docs:", all_docs)
 
     combined_context = "\n\n".join(doc.page_content for doc in all_docs)
-    print("Context Length:", len(combined_context))
 
     # --- Prompt to Gemini ---
     daily_journal_prompt = PromptTemplate(
@@ -706,20 +680,6 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 """
     )
 
-# Write **only** the 3-paragraph  journal of their parallel self. Do not label it or explain it. Just output the journal entry.
-# which must contains 3 paragraphs
-# Do not add the same starting words and lines on each journal after the **'Dear Self,'** phrase
-
-    # chain = RetrievalQA.from_chain_type(
-    #     llm=llm,
-    #     retriever=combined_context,
-    #     chain_type="stuff",
-    #     chain_type_kwargs={"prompt": daily_journal_prompt},
-    #     # input_key="context"
-    # )
-
-    # chain = daily_journal_prompt | llm
-
     chain = LLMChain(
         llm=llm,
         prompt=daily_journal_prompt
@@ -727,11 +687,9 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 
     response = chain.invoke({
         "context": combined_context,
-        # "question": "What do you fear losing the most?"
     })
 
     generated_journal = response["text"]
-    # generated_journal = {"text": response}
 
     daily_journal_point = PointStruct(
         id=str(uuid4()),
