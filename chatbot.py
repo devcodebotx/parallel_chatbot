@@ -12,7 +12,7 @@ from langchain_community.vectorstores.qdrant import Qdrant
 from time import time
 from langchain_core.runnables import RunnableSequence
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from models.query_model import Query
 from models.journal_model import Journal, JournalEdit
 from models.DailyInsight import DailyInsight
@@ -22,7 +22,8 @@ from datetime import datetime, timedelta
 
 load_dotenv()
 
-app = FastAPI()
+# app = FastAPI()
+app = FastAPI(root_path="/ai")
 
 setup_cors(app)
 
