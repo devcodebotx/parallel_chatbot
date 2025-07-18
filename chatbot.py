@@ -12,12 +12,14 @@ from langchain_community.vectorstores.qdrant import Qdrant
 from time import time
 from langchain_core.runnables import RunnableSequence
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
 from models.query_model import Query
 from models.journal_model import Journal, JournalEdit
 from models.DailyInsight import DailyInsight
 from middlewares.cors import setup_cors
 from datetime import datetime, timedelta
+import whisper
+import torch
 
 
 load_dotenv()
@@ -28,6 +30,16 @@ app = FastAPI(root_path="/ai")
 setup_cors(app)
 
 COLLECTION_NAME = os.getenv("COLLECTION_NAME")
+
+# configuration started for whisper
+print("CUDA available:", torch.cuda.is_available())
+
+model = whisper.load_model("medium").to("cpu")
+
+UPLOAD_DIR = "static"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# configuration ended for whisper
 
 qdrant = QdrantClient(
     url=os.getenv("QDRANT_URL"),
@@ -707,3 +719,20 @@ Write **only** the journal of their parallel self. Do not label it or explain it
                   points=[daily_journal_point])
 
     return {"daily_journal": {"text": generated_journal}}
+
+
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    # Run transcription
+    result = model.transcribe(file_path, task="translate", language="en")
+
+    return {
+        "filename": file.filename,
+        "transcription": result["text"]
+    }
