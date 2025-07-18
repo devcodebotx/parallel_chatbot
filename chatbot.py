@@ -722,11 +722,11 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 
 
 @app.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
+def transcribe_audio(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
 
     with open(file_path, "wb") as f:
-        content = await file.read()
+        content = file.read()
         f.write(content)
 
     # Run transcription
