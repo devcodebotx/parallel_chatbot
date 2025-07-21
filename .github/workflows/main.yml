@@ -21,16 +21,18 @@ jobs:
 
       - name: Rsync project to VPS
         run: |
-          rsync -avz --delete ./ ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:/var/www/parallel/nextjs \
-            -e "ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_PORT }}"
+          rsync -avz --delete ./ ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:/var/www/parallel/backend \
+            -e "ssh -p ${{ secrets.VPS_PORT }} -o StrictHostKeyChecking=no"
 
       - name: Install dependencies and restart FastAPI app
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} -p ${{ secrets.VPS_PORT }} <<EOF
+          ssh -p ${{ secrets.VPS_PORT }} -o StrictHostKeyChecking=no ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} <<'EOF'
+            set -e
+
             cd /var/www/parallel/backend
 
             echo "Activating virtual environment..."
-            source parallel/bin/activate || source venv/bin/activate
+            source parallel/bin/activate
 
             echo "Installing dependencies from requirements.txt..."
             pip install -r requirements.txt
