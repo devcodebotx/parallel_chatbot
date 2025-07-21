@@ -721,15 +721,33 @@ Write **only** the journal of their parallel self. Do not label it or explain it
     return {"daily_journal": {"text": generated_journal}}
 
 
+# @app.post("/transcribee")
+# async def transcribe_audio(file: UploadFile = File(...)):
+#     file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+#     with open(file_path, "wb") as f:
+#         content = await file.read()
+#         f.write(content)
+
+#     # Run transcription
+#     result = model.transcribe(file_path, task="translate", language="en")
+
+#     return {
+#         "filename": file.filename,
+#         "transcription": result["text"]
+#     }
+
+
 @app.post("/transcribe")
-def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
 
+    # Save uploaded file
     with open(file_path, "wb") as f:
-        content = file.read()
+        content = await file.read()
         f.write(content)
 
-    # Run transcription
+    # Transcribe using Whisper
     result = model.transcribe(file_path, task="translate", language="en")
 
     return {
