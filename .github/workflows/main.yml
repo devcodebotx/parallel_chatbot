@@ -1,0 +1,44 @@
+name: Deploy FastAPI to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy FastAPI Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_PRIVATE_KEY }}
+
+      - name: Rsync project to VPS
+        run: |
+          rsync -avz --delete ./ ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:/var/www/parallel/backend \
+            -e "ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_PORT }}"
+
+      - name: Install dependencies and restart FastAPI app
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} -p ${{ secrets.VPS_PORT }} <<EOF
+            cd /var/www/parallel/backend
+
+            echo "Activating virtual environment..."
+            source parallel/bin/activate
+
+            echo "Installing dependencies from requirements.txt..."
+            pip install -r requirements.txt
+
+            echo "Restarting FastAPI backend service..."
+            sudo systemctl restart fastapi-backend
+
+            echo "Checking service status..."
+            sudo systemctl status fastapi-backend --no-pager
+
+          EOF
