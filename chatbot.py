@@ -34,7 +34,7 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 # configuration started for whisper
 print("CUDA available:", torch.cuda.is_available())
 
-model = whisper.load_model("large-v3").to("cpu")
+model = whisper.load_model("large").to("cpu")
 
 UPLOAD_DIR = "static"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
