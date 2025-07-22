@@ -62,5 +62,5 @@ jobs:
           
           # Verify service is running
           sudo systemctl status fastapi-backend --no-pager
-          echo '✅ Deployment & Service Restart Completed'
+          echo ' Deployment & Service Restart Completed'
         "
