@@ -1,3 +1,4 @@
+from fastapi import FastAPI, File, UploadFile, Form
 from uuid import uuid4
 from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from dotenv import load_dotenv
@@ -21,6 +22,12 @@ from datetime import datetime, timedelta
 import whisper
 import torch
 
+from PIL import Image
+import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+import io
+from fastapi.responses import JSONResponse
+
 
 load_dotenv()
 
@@ -28,6 +35,10 @@ load_dotenv()
 app = FastAPI(root_path="/ai")
 
 setup_cors(app)
+
+API_KEY = os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=API_KEY)
+
 
 COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 
@@ -738,3 +749,27 @@ async def transcribe_audio(file: UploadFile = File(...)):
         "filename": file.filename,
         "transcription": result["text"]
     }
+
+
+@app.post("/extract-text")
+async def extract_text(prompt: str = Form(...), image: UploadFile = File(...)):
+    try:
+        # Read image bytes and convert to PIL Image
+        contents = await image.read()
+        image_pil = Image.open(io.BytesIO(contents))
+
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+
+        response = model.generate_content(
+            [image_pil, prompt],
+            generation_config={"temperature": 0},
+            safety_settings={
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            }
+        )
+
+        return {"text": response.text}
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
