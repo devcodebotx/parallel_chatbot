@@ -38,7 +38,7 @@ app = FastAPI(root_path="/ai")
 
 setup_cors(app)
 
-API_KEY = os.getenv("GOOGLE_API_KEY")
+API_KEY = os.getenv("OCR_GOOGLE_API_KEY")
 genai.configure(api_key=API_KEY)
 
 
