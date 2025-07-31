@@ -798,7 +798,7 @@ Don't include markdown, backticks, explanation, headings, or code formatting.
         # Parse JSON
         parsed = json.loads(raw)
         return {
-            "original_text": parsed.get("original_text", "").strip(),
+            "original_text ": parsed.get("original_text", "").strip(),
             "english_translation": parsed.get("english_translation", "").strip()
         }
 
