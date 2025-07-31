@@ -761,7 +761,7 @@ async def extract_text(prompt: str = Form(...), image: UploadFile = File(...)):
         image_pil = Image.open(io.BytesIO(contents))
 
         # Load Gemini model
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
         # System prompt
         full_prompt = f"""
