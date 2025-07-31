@@ -10,7 +10,7 @@ ENV/
 .venv/
 .env/
 .parallel/
-
+parallel/
 
 # IDEs
 .vscode/
@@ -63,5 +63,15 @@ parallel.py
 reflection.py
 parallel.py
 parallel.py
+<<<<<<< Updated upstream
 shabir.py
 all-files.txt
+
+
+static/*
+!static/.gitkeep
+
+
+# Ignore vim swap files
+*.swp
+
