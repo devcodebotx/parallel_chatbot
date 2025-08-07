@@ -22,7 +22,8 @@ from datetime import datetime, timedelta
 import whisper
 import torch
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import io
@@ -33,10 +34,13 @@ import re
 
 load_dotenv()
 
+register_heif_opener()
+
 # app = FastAPI()
 app = FastAPI(root_path="/ai")
 
 setup_cors(app)
+
 
 API_KEY = os.getenv("OCR_GOOGLE_API_KEY")
 genai.configure(api_key=API_KEY)
@@ -756,14 +760,21 @@ async def transcribe_audio(file: UploadFile = File(...)):
 @app.post("/extract-text")
 async def extract_text(prompt: str = Form(...), image: UploadFile = File(...)):
     try:
-        # Read image bytes
+        # Read uploaded image
         contents = await image.read()
-        image_pil = Image.open(io.BytesIO(contents))
+        try:
+            image_pil = Image.open(io.BytesIO(contents))
+        except UnidentifiedImageError:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Unsupported or invalid image format. Please upload a valid image (JPG, PNG, HEIC, etc.)."}
+            )
 
         # Load Gemini model
         model = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
-        # System prompt
+        # Define prompt
         full_prompt = f"""
 Please extract only the visible text from the uploaded image.
 Then translate it into English.
@@ -787,20 +798,81 @@ Don't include markdown, backticks, explanation, headings, or code formatting.
             }
         )
 
-        # Clean response text
+        # Clean & parse response
         raw = response.text.strip()
 
-        # Remove markdown backticks ```json ... ```
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*|\s*```$", "",
                          raw.strip(), flags=re.IGNORECASE)
 
-        # Parse JSON
         parsed = json.loads(raw)
+
         return {
-            "original_text ": parsed.get("original_text", "").strip(),
+            "original_text": parsed.get("original_text", "").strip(),
             "english_translation": parsed.get("english_translation", "").strip()
         }
 
+    except json.JSONDecodeError:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Failed to parse response. The AI response format may have changed."}
+        )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Internal server error: {str(e)}"}
+        )
+
+
+# @app.post("/extract-text")
+# async def extract_text(prompt: str = Form(...), image: UploadFile = File(...)):
+#     try:
+#         # Read image bytes
+#         contents = await image.read()
+#         image_pil = Image.open(io.BytesIO(contents))
+
+#         # Load Gemini model
+#         model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+
+#         # System prompt
+#         full_prompt = f"""
+# Please extract only the visible text from the uploaded image.
+# Then translate it into English.
+# Respond in this exact JSON format:
+
+# {{
+#   "original_text": "actual Urdu/Arabic text without any prefix or heading",
+#   "english_translation": "the English translation only"
+# }}
+
+# Don't include markdown, backticks, explanation, headings, or code formatting.
+# """
+
+#         # Generate content
+#         response = model.generate_content(
+#             [image_pil, full_prompt],
+#             generation_config={"temperature": 0},
+#             safety_settings={
+#                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+#                 HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+#             }
+#         )
+
+#         # Clean response text
+#         raw = response.text.strip()
+
+#         # Remove markdown backticks ```json ... ```
+#         if raw.startswith("```"):
+#             raw = re.sub(r"^```(?:json)?\s*|\s*```$", "",
+#                          raw.strip(), flags=re.IGNORECASE)
+
+#         # Parse JSON
+#         parsed = json.loads(raw)
+#         return {
+#             "original_text ": parsed.get("original_text", "").strip(),
+#             "english_translation": parsed.get("english_translation", "").strip()
+#         }
+
+#     except Exception as e:
+#         return JSONResponse(status_code=500, content={"error": str(e)})
