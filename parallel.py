@@ -9,11 +9,10 @@ from langchain_community.vectorstores import Qdrant
 from langchain_qdrant import Qdrant
 from langchain_community.vectorstores.qdrant import Qdrant
 
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
+from fastapi import FastAPI
+from pydantic import SecretStr
 from fastapi.middleware.cors import CORSMiddleware
-from .models.query_model import Query, user_id
-
+from .models.query_model import Query
 
 load_dotenv()
 
@@ -29,7 +28,7 @@ app.add_middleware(
 )
 
 
-COLLECTION_NAME = os.getenv("COLLECTION_NAME")
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "")
 # USER_ID = os.getenv("USER_ID")
 
 qdrant = QdrantClient(
@@ -52,24 +51,24 @@ if not COLLECTION_NAME:
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="type",
-    field_schema="keyword",
+    field_schema="keyword",  # type: ignore
 )
 # userId field pe index create karo (UUID ya keyword type)
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="userId",
-    field_schema="keyword",
+    field_schema="keyword",  # type: ignore
 )
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="answer",
-    field_schema="keyword",
+    field_schema="keyword",  # type: ignore
 )
 
 # Embedding model
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
-    google_api=os.getenv("GOOGLE_API_KEY")
+    google_api_key=SecretStr(os.getenv("GOOGLE_API_KEY", ""))
 )
 
 # LangChain vector store
@@ -106,7 +105,7 @@ retriever = vectorstore.as_retriever(
 
 llm = GoogleGenerativeAI(
     model="gemini-1.5-flash",
-    api_key=os.getenv("GOOGLE_API_KEY")
+    api_key=SecretStr(os.getenv("GOOGLE_API_KEY", ""))
 )
 
 prompt = PromptTemplate(

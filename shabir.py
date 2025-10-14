@@ -17,7 +17,7 @@ app = FastAPI(root_path="/ai")
 setup_cors(app)
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=API_KEY)
+genai.configure(api_key=API_KEY) # type: ignore
 
 
 @app.post("/extract-text")
@@ -27,7 +27,7 @@ async def extract_text(prompt: str = Form(...), image: UploadFile = File(...)):
         contents = await image.read()
         image_pil = Image.open(io.BytesIO(contents))
 
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash") # type: ignore
 
         response = model.generate_content(
             [image_pil, prompt],

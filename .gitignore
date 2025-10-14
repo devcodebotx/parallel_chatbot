@@ -75,3 +75,17 @@ static/*
 # Ignore vim swap files
 *.swp
 
+
+
+# By Hassan
+extra.py
+chat_tree.jsonl
+cyberShori.py
+hassan.py
+hassan1.py
+parallel_chat_clean_ready.jsonl
+parallel_chat_clean_sample_1k.jsonl
+parallel_chat_synth_500.jsonl
+parallel_chat_tree.jsonl
+train.jsonl
+valid.jsonl

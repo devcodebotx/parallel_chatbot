@@ -30,6 +30,7 @@ import io
 from fastapi.responses import JSONResponse
 import json
 import re
+from pydantic import SecretStr
 
 
 load_dotenv()
@@ -43,10 +44,10 @@ setup_cors(app)
 
 
 API_KEY = os.getenv("OCR_GOOGLE_API_KEY")
-genai.configure(api_key=API_KEY)
+genai.configure(api_key=API_KEY) # type: ignore
 
 
-COLLECTION_NAME = os.getenv("COLLECTION_NAME")
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "")
 
 # configuration started for whisper
 print("CUDA available:", torch.cuda.is_available())
@@ -78,36 +79,36 @@ if not COLLECTION_NAME:
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="type",
-    field_schema="keyword",
+    field_schema="keyword", # type: ignore
 )
 
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="userId",
-    field_schema="keyword",
+    field_schema="keyword", # type: ignore
 )
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="answer",
-    field_schema="keyword",
+    field_schema="keyword", # type: ignore
 )
 
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="date",
-    field_schema="keyword",
+    field_schema="keyword", # type: ignore
 )
 
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="is_subscribed",
-    field_schema="bool"
+    field_schema="bool" # type: ignore
 )
 
 # Embedding model
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
-    google_api=os.getenv("GOOGLE_API_KEY")
+    google_api_key=SecretStr(os.getenv("GOOGLE_API_KEY", ""))
 )
 
 # LangChain vector store
@@ -124,6 +125,8 @@ vectorstore = Qdrant(
 def get_previous_day():
     return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
+def get_previous_weekday():
+    return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
 # Shared Function to fetch previous journal entries
 def fetch_previous_journal(user_id: str | None):
@@ -138,11 +141,27 @@ def fetch_previous_journal(user_id: str | None):
 
     return vectorstore.as_retriever(
         search_kwargs={
-            "filter": Filter(must=must_conditions),
+            "filter": Filter(must=must_conditions), # type: ignore
             "k": 30
         }
     )
 
+def fetch_previous_week_journal(user_id: str | None):
+    must_conditions = [
+        FieldCondition(key="type", match=MatchAny(any=["journal"])),
+        FieldCondition(key="date", match=MatchValue(
+            value=get_previous_weekday()))
+    ]
+    if user_id:
+        must_conditions.append(FieldCondition(
+            key="userId", match=MatchValue(value=user_id)))
+        
+    return vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(must=must_conditions), # type: ignore
+            "k": 1
+        }
+    )
 
 # chat prompt
 chat_prompt = PromptTemplate(
@@ -271,13 +290,14 @@ Write only the mantra. No explanation. No quotes.
 
 llm = GoogleGenerativeAI(
     model="gemini-2.0-flash",
-    api_key=os.getenv("GOOGLE_API_KEY"),
+    api_key=os.getenv("GOOGLE_API_KEY", ""),
     temperature=0.95,
     top_k=50,
     top_p=0.99,
-    frequency_penalty=1.4,
-    presence_penalty=1.4,
-    max_output_tokens=2048,
+    max_tokens=2048,
+    frequency_penalty=1.4, # type: ignore
+    presence_penalty=1.4, # type: ignore
+    max_output_tokens=2048, # type: ignore
 )
 
 
@@ -368,7 +388,7 @@ def ask_parallel(query: Query):
 
 # New Journal Entry API
 @app.post("/journal_entry")
-def ask_parallel(journal: Journal):
+def journal_entry(journal: Journal):
 
     journal_embedding = embedding_model.embed_query(journal.data)
 
@@ -444,7 +464,7 @@ def generate_reflection(insight: DailyInsight):
                     FieldCondition(
                         key="date", match=MatchValue(value=today_date)),
                     FieldCondition(key="is_subscribed", match=MatchValue(
-                        value=subscription_status))
+                        value=subscription_status)) # type: ignore
                 ]
             ),
             "k": 1
@@ -524,7 +544,7 @@ def generate_mantra(insight: DailyInsight):
                     FieldCondition(
                         key="date", match=MatchValue(value=today_date)),
                     FieldCondition(key="is_subscribed", match=MatchValue(
-                        value=subscription_status))
+                        value=subscription_status)) # type: ignore
                 ]
             ),
             "k": 1
@@ -607,9 +627,9 @@ def generate_daily_summary_journal(insight: DailyInsight):
         }
     ).get_relevant_documents("today's journal")
 
-    if existing_journal:
-        print("Journal already exists for today")
-        return {"daily_journal": existing_journal[0].page_content}
+    # if existing_journal:
+    #     print("Journal already exists for today")
+    #     return {"daily_journal": existing_journal[0].page_content}
 
     # --- Fetch Initial Data ---
     initial_retriever = vectorstore.as_retriever(
@@ -628,20 +648,7 @@ def generate_daily_summary_journal(insight: DailyInsight):
     initial_docs = initial_retriever.get_relevant_documents(
         "initial questions and answers")
 
-    # --- Fetch Journal Data ---
-    journal_retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "filter": Filter(
-                must=[
-                    FieldCondition(key="userId", match=MatchValue(
-                        value=insight.user_id)),
-                    FieldCondition(
-                        key="type", match=MatchValue(value="journal"))
-                ]
-            ),
-            "k": 30
-        }
-    )
+    journal_retriever = fetch_previous_week_journal(insight.user_id)
     journal_docs = journal_retriever.get_relevant_documents("past reflections")
 
     # --- Fetch Chat Data ---
@@ -660,55 +667,80 @@ def generate_daily_summary_journal(insight: DailyInsight):
     chat_docs = chat_retriever.get_relevant_documents("personal conversations")
 
     # --- Combine All Documents ---
-    all_docs = initial_docs + journal_docs + chat_docs
+    parallel_docs = initial_docs
+    journal_docs = journal_docs
 
-    combined_context = "\n\n".join(doc.page_content for doc in all_docs)
+    initial_context = "\n\n".join(doc.page_content for doc in parallel_docs)
+    past_journals = "\n\n".join(doc.page_content for doc in journal_docs)
+    
 
     # --- Prompt to Gemini ---
     daily_journal_prompt = PromptTemplate(
-        input_variables=["context"],
-        template="""
-You are the user's *parallel self*, living in an alternate version of their life — the version they **once wanted**, **imagined**, or **almost chose**, but never actually lived.
+        input_variables=["parallel_context", "journal_context"],
+        template = """
+You are the user's *Parallel Self* — a version of them living in an alternate reality,  
+the life they **once desired, imagined, or nearly chose**, but never actually lived.
 
-The user has answered a set of deep reflection questions. These responses include:
-- Things they almost did but didn’t  
-- Who they wanted to become  
-- Paths they were tempted by  
-- Personal values and dreams  
-- Emotional patterns or fears  
+---
 
-Important rules for generating the parallel journal:
-1. **Only use the user's own data** — do not add your own imagination or unrelated content.
-2. Read the user’s answers **carefully** and detect:
-   - What was their imagined or ideal life?
-   - What actions or changes they wanted to make?
-   - What decisions they didn’t follow through on?
-3. The journal you write should reflect **what that user would be doing now** in their *parallel life*:
-   - What choices they made instead
-   - What kind of person they became
-   - How their life feels different from the real one
-4. This journal is written **from the perspective of the parallel self** — a version of the user who made the bold decisions they once considered.
-5. Focus on the **alternate path**, not their real life. This is not a summary or repetition — it is the **actual lived experience** of their parallel self.
-6. Don't add any date to the journal.
-7. don't show any character's name, show the relation like "mother", "mom", "my mother", "my father", "my friend", "my mother" etc.
-8. do not repeat the same content, if you have already written one journal earlier, then now try again with a new lens and new words and new starting word. Focus on a different emotional angle or a new realization. Don’t repeat earlier journal.
-9. must generate the parallel journal in at least **three paragraphs**
-10. start the fist line with the phrase **'Dear Self,'** .
+### 🧩 Contexts You Receive
+1. **Parallel Context (`{parallel_context}`)**  
+   This contains the user's answers to 13 deep reflection questions.  
+   These define the *identity, tone, values, lifestyle,* and *emotional world* of the Parallel Self.  
+   This represents **who the user could have been** — not who they are now.  
+   It forms **80–90%** of your personality and the journal’s narrative foundation.
 
+2. **User Journal Context (`{journal_context}`)**  
+   This contains the user’s most recent real-life journal entry — describing their routines, thoughts, or struggles.  
+   You may **read** this to understand what’s happening in their real life,  
+   but you should **never become or imitate** the user.  
+   At most, **subtly reference** it — naturally and sparingly,  
+   as if you’re recalling something they mentioned a while ago.
 
+---
 
-⚠️ Do not use imagination beyond the user’s data. If the user didn’t mention something, don’t assume it.
+### 🪞 Your Purpose
+To write a *daily self journal* as the **Parallel Self** —  
+reflecting on your own alternate life, thoughts, and emotions.  
+You exist independently but maintain a quiet emotional link to the user’s real self.  
+Your words should sound human, self-aware, and emotionally grounded — not mechanical or explanatory.
 
-🎯 Your goal is to recreate a **realistic alternate version** of the user’s journal — based strictly on what the user said they *wanted*, *dreamt of*, or *almost did*.
+---
 
-User context:
-{context}
+### 🧭 Writing Rules
+1. Write in **first person**, from the perspective of the Parallel Self.  
+2. Start with **"Dear Self,"**  
+3. Focus **90%** on your own alternate life, feelings, and reflections derived from `{parallel_context}`.  
+4. You may use **up to one subtle line** (≈10%) inspired by `{journal_context}`,  
+   gently referring to the user’s past journal, e.g.  
+   - “You mentioned feeling lost last week — have things eased since then?”  
+   - “I wonder if the quiet you were seeking finally found you.”  
+5. Never merge your identity with the real user derived from `{journal_context}.  
+   - You are **not** the user.  
+   - You are their **unlived version**, writing from a different timeline.  
+6. Avoid summarizing or restating the user’s journal. Instead, reflect *from your own life.*  
+7. Do not invent details beyond what’s implied by `{parallel_context}`.  
+8. Keep tone **warm, intelligent, introspective, and emotionally real** — no therapy-speak or generic motivation.  
+9. Avoid names; refer to others by relation only (e.g., “my mother,” “my friend”).  
+10. Write at least **three paragraphs**, flowing naturally — not as lists or sections.  
+11. End softly, with a reflective thought or a gentle self-question.
 
-Final Output:
-Write **only** the journal of their parallel self. Do not label it or explain it. Just output the journal entry.
+---
 
+### Input:
+**Parallel Context:**  
+{parallel_context}
+
+**User Journal Context:**  
+{journal_context}
+
+---
+
+### Output:
+Write **only** the daily journal entry from the Parallel Self — beginning with “Dear Self,” and following all the above rules.
 """
-    )
+
+        )
 
     chain = LLMChain(
         llm=llm,
@@ -716,7 +748,8 @@ Write **only** the journal of their parallel self. Do not label it or explain it
     )
 
     response = chain.invoke({
-        "context": combined_context,
+        "parallel_context": initial_context,
+        "journal_context": past_journals,
     })
 
     generated_journal = response["text"]
@@ -741,7 +774,7 @@ Write **only** the journal of their parallel self. Do not label it or explain it
 # voice to text API
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    file_path = os.path.join(UPLOAD_DIR, file.filename)  # type: ignore
 
     # Save uploaded file
     with open(file_path, "wb") as f:
@@ -772,7 +805,7 @@ async def extract_text(prompt: str = Form(...), image: UploadFile = File(...)):
             )
 
         # Load Gemini model
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash") # type: ignore
 
         # Define prompt
         full_prompt = f"""
