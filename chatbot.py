@@ -40,7 +40,8 @@ load_dotenv()
 
 register_heif_opener()
 
-init(project=os.getenv("PROJECT_ID", ""), location="europe-west9")
+PROJECT_ID = os.getenv("PROJECT_ID", "")
+init(project=PROJECT_ID, location="europe-west9")
 
 # app = FastAPI()
 app = FastAPI(root_path="/ai")
@@ -388,8 +389,8 @@ Write only the mantra. No explanation. No quotes.
 
 
 llm = VertexAI(
-    model_name="projects/121739456737/locations/europe-west9/endpoints/7808665609767485440",
-    project="121739456737",
+    model_name=f"projects/{PROJECT_ID}/locations/europe-west9/endpoints/7808665609767485440",
+    project=PROJECT_ID,
     location="europe-west9",
     temperature=0.95,
     top_k=50,
