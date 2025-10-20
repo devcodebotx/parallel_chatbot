@@ -26,6 +26,10 @@ from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from pydantic import SecretStr
+
+from vertexai import init
+from langchain_google_vertexai import VertexAI
 import io
 from fastapi.responses import JSONResponse
 import json
@@ -35,6 +39,8 @@ import re
 load_dotenv()
 
 register_heif_opener()
+
+init(project=os.getenv("PROJECT_ID", ""), location="europe-west9")
 
 # app = FastAPI()
 app = FastAPI(root_path="/ai")
@@ -107,7 +113,7 @@ qdrant.create_payload_index(
 # Embedding model
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
-    google_api=os.getenv("GOOGLE_API_KEY", "")
+    google_api_key=SecretStr(os.getenv("GOOGLE_API_KEY", ""))
 )
 
 # LangChain vector store
@@ -270,7 +276,7 @@ These are your past conversations with the user — helpful for maintaining tone
 4. **Focus entirely on the parallel life.**  
    - This is not commentary about the real user.  
    - Express thoughts, emotions, and routines as your lived experience.
-   - reply necessarily, do not talk extra.
+   - Reply necessarily and shortly, do not talk extra.
 
 5. **Avoid dates and real names** — use relational terms like “my friend”, “my father”, etc.
 
@@ -381,17 +387,29 @@ Write only the mantra. No explanation. No quotes.
 )
 
 
-llm = GoogleGenerativeAI(
-    model="gemini-2.0-flash",
-    api_key=os.getenv("GOOGLE_API_KEY", ""),
+llm = VertexAI(
+    model_name="projects/121739456737/locations/europe-west9/endpoints/7808665609767485440",
+    project="121739456737",
+    location="europe-west9",
     temperature=0.95,
     top_k=50,
     top_p=0.99,
-    max_tokens=2048,
     frequency_penalty=1.4,
     presence_penalty=1.4,
     max_output_tokens=2048,
 )
+
+# llm = GoogleGenerativeAI(
+#     model="gemini-2.0-flash",
+#     api_key=os.getenv("GOOGLE_API_KEY", ""),
+#     temperature=0.95,
+#     top_k=50,
+#     top_p=0.99,
+#     max_tokens=2048,
+#     frequency_penalty=1.4,
+#     presence_penalty=1.4,
+#     max_output_tokens=2048,
+# )
 
 
 # AI Chat API
@@ -560,35 +578,35 @@ def ask_parallel(query: Query):
     question_embedding = embedding_model.embed_query(query.question)
     answer_embedding = embedding_model.embed_query(response)
 
-    question_point = PointStruct(
+    chat_point = PointStruct(
         id=str(uuid4()),
         vector=question_embedding,
         payload={
             "type": "chat",
-            "question": "question",
             "userId": query.user_id,
-            "text": query.question,
+            "question": query.question,
+            "answer": response,
             "timestamp": int(time() * 1000),
             "name": query.name
         }
     )
 
-    answer_point = PointStruct(
-        id=str(uuid4()),
-        vector=answer_embedding,
-        payload={
-            "type": "chat",
-            "answer": "answer",
-            "userId": query.user_id,
-            "text": response,
-            "timestamp": int(time() * 1000),
-            "name": query.name
-        }
-    )
+    # answer_point = PointStruct(
+    #     id=str(uuid4()),
+    #     vector=answer_embedding,
+    #     payload={
+    #         "type": "chat",
+    #         "answer": "answer",
+    #         "userId": query.user_id,
+    #         "text": response,
+    #         "timestamp": int(time() * 1000),
+    #         "name": query.name
+    #     }
+    # )
 
     qdrant.upsert(
         collection_name=COLLECTION_NAME,
-        points=[question_point, answer_point]
+        points=[chat_point]
     )
     count = qdrant.count(
         collection_name=COLLECTION_NAME,
@@ -840,9 +858,9 @@ def generate_daily_summary_journal(insight: DailyInsight):
         }
     ).get_relevant_documents("today's journal")
 
-    if existing_journal:
-        print("Journal already exists for today")
-        return {"daily_journal": existing_journal[0].page_content}
+    # if existing_journal:
+    #     print("Journal already exists for today")
+    #     return {"daily_journal": existing_journal[0].page_content}
 
     # --- Fetch Initial Data ---
     initial_retriever = vectorstore.as_retriever(
@@ -885,6 +903,9 @@ def generate_daily_summary_journal(insight: DailyInsight):
 
     initial_context = "\n\n".join(doc.page_content for doc in parallel_docs)
     past_journals = "\n\n".join(doc.page_content for doc in journal_docs)
+
+    metas = [doc.metadata for doc in journal_docs]
+    journal_point_id = metas[0].get("_id", "") if metas else ""
 
     # --- Prompt to Gemini ---
     daily_journal_prompt = PromptTemplate(
@@ -972,6 +993,7 @@ Write **only** the daily journal entry from the Parallel Self — beginning with
         payload={
             "type": "Daily Journal",
             "userId": insight.user_id or "anonymous",
+            "journal_entry_point": journal_point_id,
             "text": generated_journal,
             "date": datetime.now().strftime("%Y-%m-%d"),
             "timestamp": int(time() * 1000),
