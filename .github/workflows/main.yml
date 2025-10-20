@@ -20,7 +20,7 @@ jobs:
 
       - name: Setup Google credentials
         run: |
-          echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > $HOME/gcp-key.json
+          echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > $HOME/gen-lang-client-0193241993-30b3ec141e50.json
           export GOOGLE_APPLICATION_CREDENTIALS=$HOME/gen-lang-client-0193241993-30b3ec141e50.json
 
       - name: Checkout code
