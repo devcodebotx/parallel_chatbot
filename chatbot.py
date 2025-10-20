@@ -859,9 +859,9 @@ def generate_daily_summary_journal(insight: DailyInsight):
         }
     ).get_relevant_documents("today's journal")
 
-    # if existing_journal:
-    #     print("Journal already exists for today")
-    #     return {"daily_journal": existing_journal[0].page_content}
+    if existing_journal:
+        print("Journal already exists for today")
+        return {"daily_journal": existing_journal[0].page_content}
 
     # --- Fetch Initial Data ---
     initial_retriever = vectorstore.as_retriever(
@@ -884,19 +884,19 @@ def generate_daily_summary_journal(insight: DailyInsight):
     journal_docs = journal_retriever.get_relevant_documents("past reflections")
 
     # --- Fetch Chat Data ---
-    chat_retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "filter": Filter(
-                must=[
-                    FieldCondition(key="userId", match=MatchValue(
-                        value=insight.user_id)),
-                    FieldCondition(key="type", match=MatchValue(value="chat"))
-                ]
-            ),
-            "k": 30
-        }
-    )
-    chat_docs = chat_retriever.get_relevant_documents("personal conversations")
+    # chat_retriever = vectorstore.as_retriever(
+    #     search_kwargs={
+    #         "filter": Filter(
+    #             must=[
+    #                 FieldCondition(key="userId", match=MatchValue(
+    #                     value=insight.user_id)),
+    #                 FieldCondition(key="type", match=MatchValue(value="chat"))
+    #             ]
+    #         ),
+    #         "k": 30
+    #     }
+    # )
+    # chat_docs = chat_retriever.get_relevant_documents("personal conversations")
 
     # --- Combine All Documents ---
     parallel_docs = initial_docs
