@@ -30,6 +30,7 @@ import io
 from fastapi.responses import JSONResponse
 import json
 import re
+from utils.clean_generated_text import clean_generated_text
 
 
 load_dotenv()
@@ -121,6 +122,72 @@ vectorstore = Qdrant(
 
 
 # ----- UTILS -----
+# -----helper methods for today's reflection started-----
+
+# banned starting patterns (case-insensitive). order matters (longer first).
+BANNED_PREFIXES = [
+    # today's reflection, today’s reflection
+    r"^\s*today['’`]?s reflection[:\-\s]*",
+    r"^\s*today[:,\s]+",                     # Today, ...
+    r"^\s*the\b",                            # starts with 'The'
+    r"^\s*that\b",                           # starts with 'that'
+]
+
+BANNED_I_OPENINGS = [
+    r"^\s*I\s+feel\b",
+    r"^\s*I\s+felt\b",
+    r"^\s*I\s+am\b",
+    r"^\s*I\s+was\b"
+]
+
+
+def strip_banned_prefixes(text: str) -> str:
+    """Remove obvious banned prefixes (e.g. "Today's reflection:")"""
+    for p in BANNED_PREFIXES:
+        text = re.sub(p, "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def starts_with_banned_i_opening(text: str) -> bool:
+    first_line = text.strip().split("\n", 1)[0]
+    for p in BANNED_I_OPENINGS:
+        if re.match(p, first_line, flags=re.IGNORECASE):
+            return True
+    return False
+
+
+def rewrite_first_clause_with_synonym(text: str) -> str:
+    """
+    Light-weight deterministic rewrite for first clause:
+    if starts with "I feel / I felt ..." replace the opening with alternatives.
+    This is a fallback if you don't want to call the LLM to regenerate.
+    """
+    alternatives = [
+        "There's a quiet sense that",
+        "A familiar tug suggests",
+        "Something inside notices",
+        "It feels as if",
+        "A subtle feeling arises that"
+    ]
+    # replace only the first occurrence of a banned opening
+    for p in BANNED_I_OPENINGS:
+        m = re.match(p + r"(.*)", text.strip(),
+                     flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            rest = m.group(1).strip()
+            alt = alternatives[0]  # choose first; could rotate or randomize
+            # keep punctuation consistent
+            first_sentence = f"{alt} {rest}".strip()
+            # now attach the rest of the text after the first sentence break if exists
+            remaining = ""
+            parts = re.split(r'([.!?]\s+)', text.strip(), maxsplit=1)
+            if len(parts) > 2:
+                remaining = "".join(parts[1:])
+            return first_sentence + ((" " + remaining) if remaining else "")
+    return text
+
+
+# -----helper methods for today's reflection ended-----
 
 def get_previous_weekday():
     return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -235,7 +302,6 @@ The user has written a journal. This journal include:
 - Emotional patterns or fears  
 
 Important rules for generating the reflection:
-
 1. **Only use the user's own data** — do not add your own imagination or unrelated content.
 2. Reflect deeply on what yesterday meant in this alternate life. 
 3. Focus on emotional or thematic significance — avoid restating events.
@@ -247,6 +313,22 @@ Important rules for generating the reflection:
 8. Make it **very short**: **1–2 sentences** max.
 9. Do not use **today** in the start of the reflection.
 10. Do not repeat **The**, **that** in the start of the reflection.
+11. **Do NOT start the reflection with any of these words or phrases (case-insensitive):**
+   - "today", "today's reflection", "the", "that", "I feel", "I felt", "I am", "I was"
+12. If the natural opening would start with "I feel" or similar, **use a different opening** (examples below).
+13. If the model output violates any rule, rewrite it to comply.
+14.  Don't repeat the same structure or wording as previous reflections.
+
+Examples (bad -> good):
+- Bad: "Today's reflection: I felt empty." 
+  Good: "A small emptiness moved through me, less like an absence than an instruction."
+- Bad: "I feel like I lost time."
+  Good: "Loss of time crept through the day, a soft narrowing of attention."
+- Bad: "A quiet hum of purpose settled within, answering a call that felt both old and new."
+  Good: "Purpose settled within, answering a call that felt both old and new."
+- Bad: "Another day pulls me further from who could have been, solidifying all choices made."
+  Good: "Pulls me further from who could have been, solidifying all choices made."
+
 
 🎯 Think: What does this moment *mean* — not what happened.
 
@@ -457,27 +539,27 @@ def generate_reflection(insight: DailyInsight):
     retriever = None
 
     # Step 1: Check if reflection exists for today with same subscription status
-    existing_reflection = vectorstore.as_retriever(
-        search_kwargs={
-            "filter": Filter(
-                must=[
-                    FieldCondition(key="userId", match=MatchValue(
-                        value=insight.user_id)),
-                    FieldCondition(
-                        key="type", match=MatchValue(value="reflection")),
-                    FieldCondition(
-                        key="date", match=MatchValue(value=today_date)),
-                    FieldCondition(key="is_subscribed", match=MatchValue(
-                        value=subscription_status))
-                ]
-            ),
-            "k": 1
-        }
-    ).get_relevant_documents("today's reflection")
+    # existing_reflection = vectorstore.as_retriever(
+    #     search_kwargs={
+    #         "filter": Filter(
+    #             must=[
+    #                 FieldCondition(key="userId", match=MatchValue(
+    #                     value=insight.user_id)),
+    #                 FieldCondition(
+    #                     key="type", match=MatchValue(value="reflection")),
+    #                 FieldCondition(
+    #                     key="date", match=MatchValue(value=today_date)),
+    #                 FieldCondition(key="is_subscribed", match=MatchValue(
+    #                     value=subscription_status))
+    #             ]
+    #         ),
+    #         "k": 1
+    #     }
+    # ).get_relevant_documents("today's reflection")
 
-    if existing_reflection:
-        print("reflection already exists for today")
-        return {"reflection": existing_reflection[0].page_content}
+    # if existing_reflection:
+    #     print("reflection already exists for today")
+    #     return {"reflection": existing_reflection[0].page_content}
 
     # Step 2: Generate Context
     if subscription_status:
@@ -506,6 +588,36 @@ def generate_reflection(insight: DailyInsight):
 
     reflection_text = response["result"]
     print("subscription status is:", subscription_status)
+
+    # --- New Cleaning Layer ---
+    # 1️⃣ First, run your tested cleaner
+    reflection_text = clean_generated_text(reflection_text)
+
+    # 2️⃣ Then apply minimal safety check
+    if starts_with_banned_i_opening(reflection_text):
+        reflection_text = rewrite_first_clause_with_synonym(reflection_text)
+
+    # 3️⃣ Optional final polish with LLM fallback (only if still bad)
+    if starts_with_banned_i_opening(reflection_text) or re.match(
+        r"^\s*(today|today['’`]?s reflection|the|that)\b", reflection_text, re.IGNORECASE
+    ):
+        rewrite_prompt = PromptTemplate(
+            input_variables=["bad_text"],
+            template="""
+    Rewrite the following very short reflection (1-2 sentences). Must:
+    - Keep the meaning and emotional tone.
+    - NOT start with: today, today's reflection, the, that, I feel, I felt, I am, I was (case-insensitive).
+    - Keep it 1-2 sentences.
+    Return only the rewritten reflection.
+
+    Text:
+    {bad_text}
+    """
+        )
+        rewrite_chain = LLMChain(llm=llm, prompt=rewrite_prompt)
+        resp = rewrite_chain.invoke({"bad_text": reflection_text})
+        reflection_text = resp.get("text") or resp.get(
+            "result") or reflection_text
 
     # Step 4: Save in Qdrant
     qdrant.upsert(
@@ -757,6 +869,11 @@ Write **only** the daily journal entry from the Parallel Self — beginning with
     })
 
     generated_journal = response["text"]
+
+   # ✅ Clean repetitive phrases before saving
+    cleaned_journal = clean_generated_text(generated_journal)
+
+    print(" Cleaned Journal Preview:", cleaned_journal[:300])
 
     daily_journal_point = PointStruct(
         id=str(uuid4()),
