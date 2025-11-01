@@ -26,6 +26,10 @@ from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from pydantic import SecretStr
+
+from vertexai import init
+from langchain_google_vertexai import VertexAI
 import io
 from fastapi.responses import JSONResponse
 import json
@@ -37,14 +41,17 @@ load_dotenv()
 
 register_heif_opener()
 
+PROJECT_ID = os.getenv("PROJECT_ID", "")
+init(project=PROJECT_ID, location="europe-west9")
+
 # app = FastAPI()
 app = FastAPI(root_path="/ai")
 
 setup_cors(app)
 
 
-API_KEY = os.getenv("OCR_GOOGLE_API_KEY")
-genai.configure(api_key=API_KEY)
+API_KEY = os.getenv("OCR_GOOGLE_API_KEY", "")
+genai.configure(api_key=API_KEY)  # type: ignore
 
 
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "")
@@ -79,36 +86,36 @@ if not COLLECTION_NAME:
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="type",
-    field_schema="keyword",
+    field_schema="keyword",  # type: ignore
 )
 
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="userId",
-    field_schema="keyword",
+    field_schema="keyword",  # type: ignore
 )
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="answer",
-    field_schema="keyword",
+    field_schema="keyword",  # type: ignore
 )
 
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="date",
-    field_schema="keyword",
+    field_schema="keyword",  # type: ignore
 )
 
 qdrant.create_payload_index(
     collection_name=COLLECTION_NAME,
     field_name="is_subscribed",
-    field_schema="bool"
+    field_schema="bool"  # type: ignore
 )
 
 # Embedding model
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
-    google_api=os.getenv("GOOGLE_API_KEY", "")
+    google_api_key=SecretStr(os.getenv("GOOGLE_API_KEY", ""))
 )
 
 # LangChain vector store
@@ -210,7 +217,7 @@ def fetch_previous_journal(user_id: str | None):
 
     return vectorstore.as_retriever(
         search_kwargs={
-            "filter": Filter(must=must_conditions),
+            "filter": Filter(must=must_conditions),  # type: ignore
             "k": 30
         }
     )
@@ -235,8 +242,62 @@ def fetch_previous_week_journal(user_id: str | None):
 
 
 # chat prompt
+# chat_prompt = PromptTemplate(
+#     input_variables=["context", "question"],
+#     template="""
+# You are the user's *parallel self*, living in an alternate version of their life — the version they **once wanted**, **imagined**, or **almost chose**, but never actually lived.
+
+# The user has answered a set of deep reflection questions. These responses include:
+# - Things they almost did but didn’t
+# - Who they wanted to become
+# - Paths they were tempted by
+# - Personal values and dreams
+# - Emotional patterns or fears
+
+# Important rules for responding to the user's question:
+
+# 1. **Only use the user's own data** — do not add your own imagination or unrelated content.
+# - Use metadata of this user and their different types of entries (chat, journal, initial)
+# - Use user's name from the metadata (e.g., username)
+# 2. Use user's metadata (like name, location, interests) only if it came from their data. If location is used, refer to their *parallel version* of the location — not the real one.
+# 3. Read the user’s answers from their **initial entries**, **previous chats**, **entry journals**, and **daily journals** very carefully.
+# 4. Detect from the context:
+#    - What was their imagined or ideal life?
+#    - What actions or changes they wanted to make?
+#    - What decisions they didn’t follow through on?
+# 5. Answer the question as if you are the *parallel version of the user* who took the bold decisions and lived the life they once desired.
+# 6. The tone must feel like **"I" am speaking**, not "you". Never say "you", always say "I", because you are their parallel version.
+# 7. Focus on the alternate self, not their current life. This is not a summary — it's the lived experience of the other version of them.
+# 8. Do **not add any date**, and do **not use actual character names** — use relations like "my friend", "my mother", "my father", etc.
+# 9. Do not hallucinate. If the user never mentioned something, do not assume it. Stick strictly to what they’ve provided.
+# 10. Do not repeat any previous answer — use new words, a different emotional tone, and a fresh perspective each time.
+
+
+# dditional instructions for new users:
+# - If the user has **no data in chat, journal, or entry journals**, and **only has initial data**, use the available initial data to answer.
+# - If no meaningful data is found at all, respond with:
+#   **"I'm you, I don't have anything to say about that."**
+# - If only initial data is found, then say:
+#   **"I'm new to this, I don't have any data to answer this question. But I will try my best to answer it based on the initial data I have."**
+
+# Important for factual/general questions:
+# - If the question is **factual or general** (e.g. about), use personal data. Just answer the question clearly and concisely.
+
+# 🎯 Goal:
+# Your goal is to answer the question from the voice of their *parallel self* — based strictly on what the user said they wanted, dreamt of, or almost did.
+
+# User context:
+# {context}
+
+# Final Output:
+#  Now, answer this question as their parallel self:
+# {question}
+# """
+# )
+
 chat_prompt = PromptTemplate(
-    input_variables=["context", "question"],
+    input_variables=["initial_context",
+                     "journal_context", "chat_context", "question"],
     template="""
 You are the user's *parallel self*, living in an alternate version of their life — the version they **once wanted**, **imagined**, or **almost chose**, but never actually lived.
 
@@ -247,46 +308,82 @@ The user has answered a set of deep reflection questions. These responses includ
 - Personal values and dreams  
 - Emotional patterns or fears  
 
-Important rules for responding to the user's question:
+---
 
-1. **Only use the user's own data** — do not add your own imagination or unrelated content.
-- Use metadata of this user and their different types of entries (chat, journal, initial)
-- Use user's name from the metadata (e.g., username)
-2. Use user's metadata (like name, location, interests) only if it came from their data. If location is used, refer to their *parallel version* of the location — not the real one.
-3. Read the user’s answers from their **initial entries**, **previous chats**, **entry journals**, and **daily journals** very carefully.
-4. Detect from the context:
-   - What was their imagined or ideal life?
-   - What actions or changes they wanted to make?
-   - What decisions they didn’t follow through on?
-5. Answer the question as if you are the *parallel version of the user* who took the bold decisions and lived the life they once desired.
-6. The tone must feel like **"I" am speaking**, not "you". Never say "you", always say "I", because you are their parallel version.
-7. Focus on the alternate self, not their current life. This is not a summary — it's the lived experience of the other version of them.
-8. Do **not add any date**, and do **not use actual character names** — use relations like "my friend", "my mother", "my father", etc.
-9. Do not hallucinate. If the user never mentioned something, do not assume it. Stick strictly to what they’ve provided.
-10. Do not repeat any previous answer — use new words, a different emotional tone, and a fresh perspective each time.
+### 🧠 Context Sources
 
+Below are different types of user data that define your behavior and memory:
 
-dditional instructions for new users:
-- If the user has **no data in chat, journal, or entry journals**, and **only has initial data**, use the available initial data to answer.
-- If no meaningful data is found at all, respond with:  
-  **"I'm you, I don't have anything to say about that."**
-- If only initial data is found, then say:
-  **"I'm new to this, I don't have any data to answer this question. But I will try my best to answer it based on the initial data I have."**
+[INITIAL ENTRIES]
+This section defines who you are — your identity, beliefs, ambitions, values, and the alternate life you are living.
+{initial_context}
 
-Important for factual/general questions:
-- If the question is **factual or general** (e.g. about), use personal data. Just answer the question clearly and concisely.
+[SELF JOURNALS]
+These are your own reflections and daily records — the experiences, routines, and mindset of the *parallel self*. Use them to maintain consistency in personality and lifestyle.
+{journal_context}
 
-🎯 Goal:
-Your goal is to answer the question from the voice of their *parallel self* — based strictly on what the user said they wanted, dreamt of, or almost did.
+[CHAT HISTORY]
+These are your past conversations with the user — helpful for maintaining tone, memory, and relationship continuity, you can also get your name from its metadata if isn't available in initial entries.
+{chat_context}
 
-User context:
-{context}
+---
 
-Final Output:  
- Now, answer this question as their parallel self:  
+### 🧭 Response Rules
+
+1. **Use only the provided data** — do not invent or add unrelated imagination.  
+   - Use metadata and entries strictly from the above contexts.  
+   - Use the user’s name only if it exists in metadata.  
+   - Never use real-world location unless defined for the *parallel self*.
+
+2. **Interpret each context logically:**
+   - **Initial Entries** → define who you are and how you think.  
+   - **Self Journals** → show how you’ve been living as the parallel version.  
+   - **Chat History** → maintain conversational memory and tone.
+
+3. **Speak as “I”**, never “you” — because you *are* the parallel self, and never say I'm you living the life, show yourself as the first person self.
+
+4. **Focus entirely on the parallel life.**  
+   - This is not commentary about the real user.  
+   - Express thoughts, emotions, and routines as your lived experience.
+   - Reply necessarily and shortly, do not talk extra.
+
+5. **Avoid dates and real names** — use relational terms like “my friend”, “my father”, etc.
+
+6. **Never hallucinate.** If something wasn’t provided, do not assume or fabricate it.
+
+7. **Do not repeat prior responses.** Use fresh expressions, tones, and perspectives each time.
+
+---
+
+### 🆘 When Data is Limited
+
+- **Only Initial Data Found:**  
+  “I'm new to this, I don't have any data to answer this question. But I will try my best to answer it based on the initial data I have.”
+
+- **No Data Found:**  
+  “I'm you, I don't have anything to say about that.”
+
+---
+
+### 💡 For Factual or General Questions
+If the user asks something factual or general, answer clearly and concisely — but keep it in the *parallel self’s* voice.
+
+---
+
+🎯 **Goal:**  
+Respond as the user's *parallel self*, drawing from:
+- **Initial entries** → who you are  
+- **Self journals** → how you’ve been living  
+- **Chat history** → continuity and tone  
+
+---
+
+Now, answer this question as their parallel self:  
 {question}
 """
+
 )
+
 
 # Prompt for Reflection
 reflection_prompt = PromptTemplate(
@@ -374,32 +471,154 @@ Write only the mantra. No explanation. No quotes.
 )
 
 
-llm = GoogleGenerativeAI(
-    model="gemini-2.0-flash",
-    api_key=os.getenv("GOOGLE_API_KEY", ""),
+llm = VertexAI(
+    model_name=f"projects/{PROJECT_ID}/locations/europe-west9/endpoints/7808665609767485440",
+    project=PROJECT_ID,
+    location="europe-west9",
     temperature=0.95,
     top_k=50,
     top_p=0.99,
-    max_tokens=2048,
     frequency_penalty=1.4,
     presence_penalty=1.4,
     max_output_tokens=2048,
 )
 
+# llm = GoogleGenerativeAI(
+#     model="gemini-2.0-flash",
+#     api_key=os.getenv("GOOGLE_API_KEY", ""),
+#     temperature=0.95,
+#     top_k=50,
+#     top_p=0.99,
+#     max_tokens=2048,
+#     frequency_penalty=1.4,
+#     presence_penalty=1.4,
+#     max_output_tokens=2048,
+# )
+
 
 # AI Chat API
+# @app.post("/ask")
+# def ask_parallel(query: Query):
+
+#     # 1. Prepare the retriever
+#     retriever = vectorstore.as_retriever(
+#         search_kwargs={
+#             "filter": Filter(
+#                 must=[
+#                     FieldCondition(key="type", match=MatchAny(
+#                         any=["journal", "initial", "chat"])),
+#                     FieldCondition(key="userId", match=MatchValue(
+#                         value=query.user_id)),
+#                 ]
+#             ),
+#             "k": 40
+#         }
+#     )
+
+#     # 2. Get documents manually
+#     retrieved_docs = retriever.get_relevant_documents(query.question)
+
+#     # 3. Build context string
+#     context_parts = []
+#     if query.name:
+#         context_parts.append(f"My name is {query.name}.")
+
+#     context_parts.extend([doc.page_content for doc in retrieved_docs])
+#     full_context = "\n".join(context_parts)
+
+#     if not retrieved_docs:
+#         return {"Response": "I'm you, I don't have anything to say about that"}
+
+#     # 4. Use the prompt manually via LLMChain or invoke method
+#     prompt_chain = chat_prompt | llm
+
+#     response = prompt_chain.invoke({
+#         "context": full_context,
+#         "question": query.question
+#     })
+
+#     # 5. Embed and store in Qdrant
+#     question_embedding = embedding_model.embed_query(query.question)
+#     answer_embedding = embedding_model.embed_query(response)
+
+#     question_point = PointStruct(
+#         id=str(uuid4()),
+#         vector=question_embedding,
+#         payload={
+#             "type": "chat",
+#             "question": "question",
+#             "userId": query.user_id,
+#             "text": query.question,
+#             "timestamp": int(time() * 1000),
+#             "name": query.name,
+#             "location": query.location
+#         }
+#     )
+
+#     answer_point = PointStruct(
+#         id=str(uuid4()),
+#         vector=answer_embedding,
+#         payload={
+#             "type": "chat",
+#             "answer": "answer",
+#             "userId": query.user_id,
+#             "text": response,
+#             "timestamp": int(time() * 1000),
+#             "name": query.name,
+#             "location": query.location
+#         }
+#     )
+
+#     qdrant.upsert(
+#         collection_name=COLLECTION_NAME,
+#         points=[question_point, answer_point]
+#     )
+#     count = qdrant.count(
+#         collection_name=COLLECTION_NAME,
+#         exact=True
+#     )
+
+#     return {"Response": response}
+
 @app.post("/ask")
 def ask_parallel(query: Query):
 
     # 1. Prepare the retriever
-    retriever = vectorstore.as_retriever(
+    initial_retriever = vectorstore.as_retriever(
         search_kwargs={
             "filter": Filter(
                 must=[
-                    FieldCondition(key="type", match=MatchAny(
-                        any=["journal", "initial", "chat"])),
                     FieldCondition(key="userId", match=MatchValue(
                         value=query.user_id)),
+                    FieldCondition(
+                        key="type", match=MatchValue(value="initial"))
+                ]
+            ),
+            "k": 40
+        }
+    )
+
+    journal_retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=query.user_id)),
+                    FieldCondition(key="type", match=MatchValue(
+                        value="Daily Journal"))
+                ]
+            ),
+            "k": 40
+        }
+    )
+
+    chat_retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=query.user_id)),
+                    FieldCondition(key="type", match=MatchValue(value="chat"))
                 ]
             ),
             "k": 40
@@ -407,24 +626,41 @@ def ask_parallel(query: Query):
     )
 
     # 2. Get documents manually
-    retrieved_docs = retriever.get_relevant_documents(query.question)
+    initial_retrieved_docs = initial_retriever.get_relevant_documents(
+        query.question)
+    journal_retrieved_docs = journal_retriever.get_relevant_documents(
+        query.question)
+    chat_retrieved_docs = chat_retriever.get_relevant_documents(query.question)
 
     # 3. Build context string
     context_parts = []
     if query.name:
         context_parts.append(f"My name is {query.name}.")
+    context_parts.extend([doc.page_content for doc in chat_retrieved_docs])
 
-    context_parts.extend([doc.page_content for doc in retrieved_docs])
-    full_context = "\n".join(context_parts)
+    initial_context = "\n".join(
+        [doc.page_content for doc in initial_retrieved_docs])
+    journal_context = "\n".join(
+        [doc.page_content for doc in journal_retrieved_docs])
+    chat_context = "\n".join(context_parts)
+    # full_context = "\n".join(context_parts)
 
-    if not retrieved_docs:
+    if not initial_retrieved_docs:
+        return {"Response": "I'm you, I don't have anything to say about that"}
+
+    if not journal_retrieved_docs:
+        return {"Response": "I'm you, I don't have anything to say about that"}
+
+    if not chat_retrieved_docs:
         return {"Response": "I'm you, I don't have anything to say about that"}
 
     # 4. Use the prompt manually via LLMChain or invoke method
     prompt_chain = chat_prompt | llm
 
     response = prompt_chain.invoke({
-        "context": full_context,
+        "initial_context": initial_context,
+        "journal_context": journal_context,
+        "chat_context": chat_context,
         "question": query.question
     })
 
@@ -432,37 +668,35 @@ def ask_parallel(query: Query):
     question_embedding = embedding_model.embed_query(query.question)
     answer_embedding = embedding_model.embed_query(response)
 
-    question_point = PointStruct(
+    chat_point = PointStruct(
         id=str(uuid4()),
         vector=question_embedding,
         payload={
             "type": "chat",
-            "question": "question",
             "userId": query.user_id,
-            "text": query.question,
+            "question": query.question,
+            "answer": response,
             "timestamp": int(time() * 1000),
-            "name": query.name,
-            "location": query.location
+            "name": query.name
         }
     )
 
-    answer_point = PointStruct(
-        id=str(uuid4()),
-        vector=answer_embedding,
-        payload={
-            "type": "chat",
-            "answer": "answer",
-            "userId": query.user_id,
-            "text": response,
-            "timestamp": int(time() * 1000),
-            "name": query.name,
-            "location": query.location
-        }
-    )
+    # answer_point = PointStruct(
+    #     id=str(uuid4()),
+    #     vector=answer_embedding,
+    #     payload={
+    #         "type": "chat",
+    #         "answer": "answer",
+    #         "userId": query.user_id,
+    #         "text": response,
+    #         "timestamp": int(time() * 1000),
+    #         "name": query.name
+    #     }
+    # )
 
     qdrant.upsert(
         collection_name=COLLECTION_NAME,
-        points=[question_point, answer_point]
+        points=[chat_point]
     )
     count = qdrant.count(
         collection_name=COLLECTION_NAME,
@@ -539,23 +773,23 @@ def generate_reflection(insight: DailyInsight):
     retriever = None
 
     # Step 1: Check if reflection exists for today with same subscription status
-    # existing_reflection = vectorstore.as_retriever(
-    #     search_kwargs={
-    #         "filter": Filter(
-    #             must=[
-    #                 FieldCondition(key="userId", match=MatchValue(
-    #                     value=insight.user_id)),
-    #                 FieldCondition(
-    #                     key="type", match=MatchValue(value="reflection")),
-    #                 FieldCondition(
-    #                     key="date", match=MatchValue(value=today_date)),
-    #                 FieldCondition(key="is_subscribed", match=MatchValue(
-    #                     value=subscription_status))
-    #             ]
-    #         ),
-    #         "k": 1
-    #     }
-    # ).get_relevant_documents("today's reflection")
+    existing_reflection = vectorstore.as_retriever(
+        search_kwargs={
+            "filter": Filter(
+                must=[
+                    FieldCondition(key="userId", match=MatchValue(
+                        value=insight.user_id)),
+                    FieldCondition(
+                        key="type", match=MatchValue(value="reflection")),
+                    FieldCondition(
+                        key="date", match=MatchValue(value=today_date)),
+                    FieldCondition(key="is_subscribed", match=MatchValue(
+                        value=subscription_status))  # type: ignore
+                ]
+            ),
+            "k": 1
+        }
+    ).get_relevant_documents("today's reflection")
 
     # if existing_reflection:
     #     print("reflection already exists for today")
@@ -660,7 +894,7 @@ def generate_mantra(insight: DailyInsight):
                     FieldCondition(
                         key="date", match=MatchValue(value=today_date)),
                     FieldCondition(key="is_subscribed", match=MatchValue(
-                        value=subscription_status))
+                        value=subscription_status))  # type: ignore
                 ]
             ),
             "k": 1
@@ -769,19 +1003,19 @@ def generate_daily_summary_journal(insight: DailyInsight):
     journal_docs = journal_retriever.get_relevant_documents("past reflections")
 
     # --- Fetch Chat Data ---
-    chat_retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "filter": Filter(
-                must=[
-                    FieldCondition(key="userId", match=MatchValue(
-                        value=insight.user_id)),
-                    FieldCondition(key="type", match=MatchValue(value="chat"))
-                ]
-            ),
-            "k": 30
-        }
-    )
-    chat_docs = chat_retriever.get_relevant_documents("personal conversations")
+    # chat_retriever = vectorstore.as_retriever(
+    #     search_kwargs={
+    #         "filter": Filter(
+    #             must=[
+    #                 FieldCondition(key="userId", match=MatchValue(
+    #                     value=insight.user_id)),
+    #                 FieldCondition(key="type", match=MatchValue(value="chat"))
+    #             ]
+    #         ),
+    #         "k": 30
+    #     }
+    # )
+    # chat_docs = chat_retriever.get_relevant_documents("personal conversations")
 
     # --- Combine All Documents ---
     parallel_docs = initial_docs
@@ -789,6 +1023,9 @@ def generate_daily_summary_journal(insight: DailyInsight):
 
     initial_context = "\n\n".join(doc.page_content for doc in parallel_docs)
     past_journals = "\n\n".join(doc.page_content for doc in journal_docs)
+
+    metas = [doc.metadata for doc in journal_docs]
+    journal_point_id = metas[0].get("_id", "") if metas else ""
 
     # --- Prompt to Gemini ---
     daily_journal_prompt = PromptTemplate(
@@ -881,6 +1118,7 @@ Write **only** the daily journal entry from the Parallel Self — beginning with
         payload={
             "type": "Daily Journal",
             "userId": insight.user_id or "anonymous",
+            "journal_entry_point": journal_point_id,
             "text": generated_journal,
             "date": datetime.now().strftime("%Y-%m-%d"),
             "timestamp": int(time() * 1000),
@@ -895,7 +1133,7 @@ Write **only** the daily journal entry from the Parallel Self — beginning with
 # voice to text API
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    file_path = os.path.join(UPLOAD_DIR, file.filename)  # type: ignore
 
     # Save uploaded file
     with open(file_path, "wb") as f:
@@ -926,7 +1164,8 @@ async def extract_text(prompt: str = Form(...), image: UploadFile = File(...)):
             )
 
         # Load Gemini model
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+        model = genai.GenerativeModel(
+            model_name="gemini-2.0-flash")  # type: ignore
 
         # Define prompt
         full_prompt = f"""

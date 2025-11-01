@@ -11,12 +11,19 @@ env:
   QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
   QDRANT_URL: ${{ secrets.QDRANT_URL }}
   OCR_GOOGLE_API_KEY: ${{ secrets.OCR_GOOGLE_API_KEY }}
+  PROJECT_ID: ${{ secrets.PROJECT_ID }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
+
+      - name: Setup Google credentials
+        run: |
+          echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > $HOME/gcp-key.json
+          export GOOGLE_APPLICATION_CREDENTIALS=$HOME/gcp-key.json
+
       - name: Checkout code
         uses: actions/checkout@v3
 
@@ -60,6 +67,7 @@ jobs:
             echo 'QDRANT_API_KEY=${{ secrets.QDRANT_API_KEY }}' >> .env
             echo 'QDRANT_URL=${{ secrets.QDRANT_URL }}' >> .env
             echo 'OCR_GOOGLE_API_KEY=${{ secrets.OCR_GOOGLE_API_KEY }}' >> .env
+            echo 'PROJECT_ID=${{ secrets.PROJECT_ID }}' >> .env
 
 
             # Activate virtual environment and install dependencies
